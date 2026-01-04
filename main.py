@@ -38,10 +38,10 @@ WATERMARK_TEXT = """
 \n\n--------------------------------------------------\n
 <em>
 🔗 <b>روابط مجتمعات الواتساب</b> 🔗
-<a href="https://chat.whatsapp.com/EHETDcCSS8u8gHJmhHIhd7?mode=ac_t">قروب مستجدين (دبلوم إدارة أعمال التأمين)</a>
-<a href="https://chat.whatsapp.com/BJKQUheFNb0J1OMnmZd2CB?mode=ac_t">قروب تسويق</a>
-<a href="https://chat.whatsapp.com/Hl54YOKpu5SBiJ0pfXnPVY?mod e=ac_t">قروب مستجدين (دبلوم مالية ومصرفية عن بعد)</a>
-<a href="https://chat.whatsapp.com/DeRMqxJj24hFWs6B3umWVI?mode=ac_t">قروب مستجدين (دبلوم موارد بشريه)</a>
+<a href="https://chat.whatsapp.com/BnV2peiKf365odX0PjGb63">قروب مستجدين (دبلوم إدارة أعمال التأمين)</a>
+<a href="https://chat.whatsapp.com/FsIsVzwxdNjFmuNsPBQOxw">قروب تسويق</a>
+<a href="https://chat.whatsapp.com/I5HxSO2YCTkAMkS8XzV2tt">قروب مستجدين (دبلوم مالية ومصرفية عن بعد)</a>
+<a href="https://chat.whatsapp.com/HenxzVBDwBb8ypl1VWonfb?mode=wwt">قروب مستجدين (دبلوم موارد بشريه)</a>
 </em>
 """
 
