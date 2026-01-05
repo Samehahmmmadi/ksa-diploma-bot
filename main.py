@@ -5,7 +5,6 @@ from telebot import types
 import requests
 import json
 import base64 # تم إضافة هذه المكتبة لتحويل الصور إلى Base64
-
 # --- إعدادات البوت والـ API ---
 
 # يتم جلب التوكن من متغيرات البيئة.
