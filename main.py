@@ -5,6 +5,7 @@ from telebot import types
 import requests
 import json
 import base64  # تم إضافة هذه المكتبة لتحويل الصور إلى Base64
+import urllib.parse  # لاستخدام تشفير نص زر المشاركة
 
 # --- إعدادات البوت والـ API ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -27,41 +28,11 @@ else:
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 GEMINI_API_KEY = "AIzaSyAMTPehz-r1y1V2TKyNeItcjkFDxFvwJ1c"
 
-# --- النص المائي (الروابط) الذي سيتم إضافته في الأسفل ---
+# (ملاحظة: لم يعد نحتاج لنص WATERMARK_TEXT الطويل؛ الأزرار الشفافة تحل محله)
 WATERMARK_TEXT = """
-\n\n--------------------------------------------------\n
+--------------------------------------------------
 <b>🔗 روابط مجتمعات الواتساب 🔗</b>
-
-<a href="https://chat.whatsapp.com/BnV2peiKf365odX0PjGb63">
-قروب مستجدين (دبلوم إدارة أعمال التأمين)
-</a>
-
-<a href="https://chat.whatsapp.com/FsIsVzwxdNjFmuNsPBQOxw">
-قروب تسويق
-</a>
-
-<a href="https://chat.whatsapp.com/I5HxSO2YCTkAMkS8XzV2tt">
-قروب مستجدين (دبلوم مالية ومصرفية عن بعد)
-</a>
-
-<a href="https://chat.whatsapp.com/HenxzVBDwBb8ypl1VWonfb">
-قروب مستجدين (دبلوم موارد بشرية)
-</a>
 """
-
-# --- دالة موحدة لإرسال الرسائل مع العلامة المائية ---
-def send_with_watermark(chat_id, text, keyboard=None):
-    """
-    ترسل رسالة مع العلامة المائية دائمًا في نهايتها.
-    """
-    text_with_watermark = text + "\n\n" + WATERMARK_TEXT
-    bot.send_message(
-        chat_id,
-        text_with_watermark,
-        parse_mode="HTML",
-        reply_markup=keyboard,
-        disable_web_page_preview=True
-    )
 
 # -- قائمة الأوامر والتابات وحالة المستخدم --
 left_commands = ["star", "help"]
@@ -85,7 +56,52 @@ right_tabs = [
 
 user_states = {}  # {chat_id: current_menu_key}
 
-# --- دوال مساعدة للوحة المفاتيح ---
+# --- دالة لإنشاء قائمة الأزرار الشفافة (Inline Buttons) للواتساب ---
+def get_whatsapp_buttons():
+    markup = types.InlineKeyboardMarkup()
+
+    # أزرار القروبات
+    markup.add(types.InlineKeyboardButton("📦 دبلوم إدارة أعمال التأمين", url="https://chat.whatsapp.com/BnV2peiKf365odX0PjGb63"))
+    markup.add(types.InlineKeyboardButton("📣 قروب تسويق", url="https://chat.whatsapp.com/FsIsVzwxdNjFmuNsPBQOxw"))
+    markup.add(types.InlineKeyboardButton("💰 دبلوم مالية ومصرفية", url="https://chat.whatsapp.com/I5HxSO2YCTkAMkS8XzV2tt"))
+    markup.add(types.InlineKeyboardButton("👥 دبلوم موارد بشرية", url="https://chat.whatsapp.com/HenxzVBDwBb8ypl1VWonfb"))
+    markup.add(types.InlineKeyboardButton("⚖️ تجارب وآراء الدكاترة والشعب", url="https://chat.whatsapp.com/L4cxz9XYEXHI3eCG5WZYLx"))
+
+    # زر مشاركة البوت (يبني رابط المشاركة من اسم البوت إن أمكن)
+    try:
+        username = bot.get_me().username or "YourBotUsername"
+    except Exception:
+        username = "YourBotUsername"
+    share_text = urllib.parse.quote("إليك مجموعات الواتساب الهامة")
+    share_url = f"https://t.me/share/url?url=https://t.me/{username}&text={share_text}"
+    markup.add(types.InlineKeyboardButton("🔗 شارك البوت مع زملائك", url=share_url))
+
+    return markup
+
+# --- دالة موحدة لإرسال الرسائل: ترسل رسالة المحتوى ثم رسالة الأزرار الشفافة ---
+def send_with_watermark(chat_id, text, keyboard=None):
+    """
+    إرسال من خطوتين:
+    1) نص المحتوى مع الـ reply keyboard (إن وُفِّر).
+    2) رسالة بعنوان روابط واتساب مع الأزرار الشفافة (Inline Keyboard).
+    """
+    # 1) الرسالة الرئيسية (قد تحتوي على لوحة مفاتيح عادية)
+    try:
+        if keyboard is not None:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+        else:
+            bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+    except telebot.apihelper.ApiTelegramException as e:
+        print(f"ERROR: Failed to send main message to {chat_id}: {e}")
+
+    # 2) رسالة الأزرار الشفافة (التي تحل محل الـ watermark القديمة)
+    try:
+        header_text = "<b>🔗 روابط مجتمعات الواتساب:</b>"
+        bot.send_message(chat_id, header_text, parse_mode="HTML", reply_markup=get_whatsapp_buttons(), disable_web_page_preview=True)
+    except telebot.apihelper.ApiTelegramException as e:
+        print(f"ERROR: Failed to send whatsapp buttons to {chat_id}: {e}")
+
+# --- دوال مساعدة للوحة المفاتيح (ReplyKeyboard) ---
 def create_keyboard(buttons):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     if all(isinstance(button_row, list) for button_row in buttons):
@@ -129,7 +145,7 @@ def get_gemini_multimodal_response(parts):
         print(f"ERROR: Unexpected Gemini API response structure: {result}")
         return "عذراً، لم أتمكن من الحصول على إجابة واضحة من الذكاء الاصطناعي."
 
-# --- قاموس المحتوى (bot_content) --- (تم تحويل أي Markdown إلى HTML)
+# --- قاموس المحتوى (bot_content) --- (مقتبس من الملف الذي أرفقته)
 bot_content = {
     "تقويم عام 1447ه‍.": "<b>🔹 التقويم الأكاديمي لجامعة الملك سعود للعام الدراسي 2025 / 2026م (1447هـ):</b>\n\n<a href=\"https://t.me/KSDN_222/85\">اضغط هنا لمشاهدة التقويم الأكاديمي 👇</a>",
     "خدمات التواصل مع الجامعة": """عمادة السنة الأولى المشتركة
@@ -424,7 +440,7 @@ h.alshareef@cfy.ksu.edu.sa
             ],
             "تعريف بالتخصص": """🔹 <b>الدبلوم المتوسط في السكرتارية التنفيذية – جامعة الملك سعود</b>
 يهدف البرنامج إلى تأهيل الطلاب بالمهارات والمعارف اللازمة لأداء مهام السكرتارية التنفيذية بكفاءة عالية.
-\n\n<b>🗂 الخطة الدراسية تتضمن:</b>
+\n<b>🗂 الخطة الدراسية تتضمن:</b>
 • مهارات الاتصال الفعال، إدارة المكاتب وتنظيم العمل، تقنيات الحاسوب وبرامج الأوفيس، إدارة الاجتماعات وتنظيم الفعاليات، مهارات كتابة التقارير والمراسلات، قواعد السلوك المهني وأخلاقيات العمل، إدارة الوقت والمهام، التخطيط والتنظيم الإداري.
 """,
             "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في السكرتارية التنفيذية: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>"
@@ -984,7 +1000,6 @@ def handle_all_messages(message):
 
         try:
             ai_response = get_gemini_multimodal_response(prompt_parts)
-            # تأكد من أن نص الـ AI لا يحتوي Markdown — إن احتجت تنظيفًا إضافيًا أضفه هنا
             send_with_watermark(chat_id, ai_response, keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
         except requests.exceptions.RequestException as e:
             print(f"ERROR: Gemini API request failed: {e}")
@@ -1128,7 +1143,7 @@ def handle_all_messages(message):
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"].get(parent_menu_key, {}).get("options", ["🔙 رجوع"]))
             add_watermark = False
 
-    # إرسال النتيجة: إما مع العلامة المائية أو بدونها حسب المتغير
+    # إرسال النتيجة: إما مع العلامة المائية (الأزرار) أو بدونها حسب المتغير
     try:
         if add_watermark:
             send_with_watermark(chat_id, reply_text, keyboard=reply_markup)
