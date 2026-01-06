@@ -1,38 +1,33 @@
-import os 
+import os
 from flask import Flask, request, abort
 import telebot
 from telebot import types
 import requests
 import json
-import base64 # تم إضافة هذه المكتبة لتحويل الصور إلى Base64
-# --- إعدادات البوت والـ API ---
+import base64  # تم إضافة هذه المكتبة لتحويل الصور إلى Base64
 
-# يتم جلب التوكن من متغيرات البيئة.
+# --- إعدادات البوت والـ API ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("⚠️ متغير البيئة TELEGRAM_TOKEN غير موجود. الرجاء إضافته في إعدادات Render.")
 
-# تهيئة كائن البوت باستخدام التوكن (تأكد من threaded=False إذا كانت هناك مشاكل غير متوقعة)
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML', threaded=False)
-# تهيئة تطبيق Flask
 app = Flask(__name__)
 
-# عنوان URL لخدمة Render الخاصة بك.
 RENDER_EXTERNAL_URL_BASE = os.getenv("RENDER_EXTERNAL_URL")
 if RENDER_EXTERNAL_URL_BASE:
     if not RENDER_EXTERNAL_URL_BASE.endswith('/'):
         RENDER_EXTERNAL_URL_BASE += '/'
     RENDER_WEBHOOK_URL = f"{RENDER_EXTERNAL_URL_BASE}{TOKEN}"
 else:
-    # هذا يجب أن يكون URL تطبيقك المنشور
     RENDER_WEBHOOK_URL = "https://your-deployed-app-url.com/" + TOKEN
     print("⚠️ تحذير: متغير البيئة RENDER_EXTERNAL_URL غير موجود. تأكد من أن RENDER_WEBHOOK_URL صحيح.")
 
 # إعدادات واجهة برمجة تطبيقات Gemini
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 GEMINI_API_KEY = "AIzaSyAMTPehz-r1y1V2TKyNeItcjkFDxFvwJ1c"
+
 # --- النص المائي (الروابط) الذي سيتم إضافته في الأسفل ---
-# تم تعديل التنسيق لجعله أقل بروزًا باستخدام <em> (مائل) بدلاً من <small>
 WATERMARK_TEXT = """
 \n\n--------------------------------------------------\n
 <b>🔗 روابط مجتمعات الواتساب 🔗</b>
@@ -54,37 +49,62 @@ WATERMARK_TEXT = """
 </a>
 """
 
-# -- قائمة الأوامر على اليسار (أزرار في لوحة المفاتيح) --
+# --- دالة موحدة لإرسال الرسائل مع العلامة المائية ---
+def send_with_watermark(chat_id, text, keyboard=None):
+    """
+    ترسل رسالة مع العلامة المائية دائمًا في نهايتها.
+    """
+    text_with_watermark = text + "\n\n" + WATERMARK_TEXT
+    bot.send_message(
+        chat_id,
+        text_with_watermark,
+        parse_mode="HTML",
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
+
+# -- قائمة الأوامر والتابات وحالة المستخدم --
 left_commands = ["star", "help"]
 
-# --- قائمة يمين البوت: التبويبات الرئيسية (أزرار في لوحة المفاتيح) ---
-# تم تعديل الترتيب وإضافة التبويبات الجديدة كما طُلب.
 right_tabs = [
     "تقويم عام 1447ه‍.",
     "خدمات التواصل مع الجامعة",
     "الاسئلة الشائعة_عام",
     "تخصصات برامج الدبلوم - حضوري",
     "تخصصات برامج الدبلوم - عن بُعد",
-    "قروبات التخصص", # تبويب جديد - الترتيب السادس
-    "قروبات المواد للمستجدين", # تبويب جديد - الترتيب السابع
-    "كتب وملخصات مواد الدبلوم", # تبويب جديد - الترتيب الثامن
+    "قروبات التخصص",
+    "قروبات المواد للمستجدين",
+    "كتب وملخصات مواد الدبلوم",
     "قناة وإعلانات الدبلوم 📢",
     "خدمات حل الواجبات وعمل المشاريع والبحوث",
     "مواقع فروع جامعة الملك سعود",
     "شروط التجسير في جامعة الملك سعود",
     "🛑شرح استخدام – البلاك بورد / Blackboard 🛑",
-    "🤖 اسأل الذكاء الاصطناعي" # الزر الجديد للدردشة مع الذكاء الاصطناعي
+    "🤖 اسأل الذكاء الاصطناعي"
 ]
 
-# قاموس لتخزين حالة القائمة الحالية لكل مستخدم
-# هذا يسمح للبوت بتذكر أين كان المستخدم في القوائم المتداخلة
-user_states = {} # {chat_id: current_menu_key}
+user_states = {}  # {chat_id: current_menu_key}
 
-# --- وظيفة للحصول على استجابة من Gemini API (متعدد الوسائط) ---
+# --- دوال مساعدة للوحة المفاتيح ---
+def create_keyboard(buttons):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    if all(isinstance(button_row, list) for button_row in buttons):
+        for button_row in buttons:
+            markup.row(*button_row)
+    else:
+        for button in buttons:
+            markup.add(button)
+    return markup
+
+def get_main_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row(*left_commands)
+    for tab in right_tabs:
+        markup.add(tab)
+    return markup
+
+# --- دالة استدعاء Gemini (كما في كودك) ---
 def get_gemini_multimodal_response(parts):
-    """
-    يرسل مطالبة متعددة الوسائط (نص وصور) إلى Gemini API ويعيد النص الذي تم إنشاؤه.
-    """
     if not GEMINI_API_KEY:
         return "عذراً، لا يمكنني التواصل مع الذكاء الاصطناعي حالياً. مفتاح الـ API غير متوفر."
 
@@ -92,7 +112,7 @@ def get_gemini_multimodal_response(parts):
         "contents": [
             {
                 "role": "user",
-                "parts": parts # هنا نمرر قائمة الأجزاء (النص والصورة)
+                "parts": parts
             }
         ]
     }
@@ -100,7 +120,7 @@ def get_gemini_multimodal_response(parts):
     params = {'key': GEMINI_API_KEY}
 
     response = requests.post(GEMINI_API_URL, headers=headers, params=params, data=json.dumps(payload))
-    response.raise_for_status() # إطلاق استثناء لأي أخطاء HTTP (مثل 4xx أو 5xx)
+    response.raise_for_status()
     result = response.json()
 
     if result.get("candidates") and result["candidates"][0].get("content") and result["candidates"][0]["content"].get("parts"):
@@ -109,10 +129,9 @@ def get_gemini_multimodal_response(parts):
         print(f"ERROR: Unexpected Gemini API response structure: {result}")
         return "عذراً، لم أتمكن من الحصول على إجابة واضحة من الذكاء الاصطناعي."
 
-# قاموس شامل لتخزين جميع محتويات البوت، بما في ذلك النصوص والقوائم الفرعية
-# تم تحويل جميع النصوص الطويلة إلى تنسيق HTML متوافق مع تليجرام
+# --- قاموس المحتوى (bot_content) --- (تم تحويل أي Markdown إلى HTML)
 bot_content = {
-     "تقويم عام 1447ه‍.": "🔹 **التقويم الأكاديمي لـ #جامعة_الملك_سعود للعام الدراسي 2025 / 2026م (1447هـ):**\n\n[اضغط هنا لمشاهدة التقويم الأكاديمي 👇](https://t.me/KSDN_222/85)",
+    "تقويم عام 1447ه‍.": "<b>🔹 التقويم الأكاديمي لجامعة الملك سعود للعام الدراسي 2025 / 2026م (1447هـ):</b>\n\n<a href=\"https://t.me/KSDN_222/85\">اضغط هنا لمشاهدة التقويم الأكاديمي 👇</a>",
     "خدمات التواصل مع الجامعة": """عمادة السنة الأولى المشتركة
 SSHELP@CFY.KSU.EDU.SA
 00966-114694006
@@ -156,7 +175,7 @@ h.alshareef@cfy.ksu.edu.sa
 فرع عليشه ( بنات)
 011 805 7331
 
-فرع الناصريه( الوشم بمسمى اخر)
+فرع الناصرية( الوشم بمسمى اخر)
 0114036600""",
     "الاسئلة الشائعة_عام": """<b>● الأسئلة الشائعة - عام</b>
 ◇ الأسئلة الشائعة حول القبول: <a href="https://dar.ksu.edu.sa/ar/FAQ">اضغط هنا</a>
@@ -341,7 +360,7 @@ h.alshareef@cfy.ksu.edu.sa
 يشمل العمل في:
 •   المنشآت الاقتصادية، البنوك (تجارية وإسلامية)، شركات التأمين، البنك المركزي السعودي، مكاتب الصرافة.
 •   القطاعات المالية بالجهات الحكومية، وزارة المالية.
-\n<b>أمثلة للوظائف:</b>
+<b>أمثلة للوظائف:</b>
 •   أمين صندوق، مأمور صرف، مساعد مدير مالي، مراقب مالي، مدقق حسابات، محصل إيرادات، مراقب تجاري.
 وغيرها من الوظائف ذات الصلة بالمجال المالي والمصرفي.
 """,
@@ -440,9 +459,9 @@ h.alshareef@cfy.ksu.edu.sa
             ],
             "تعريف بالتخصص": """🔹 <b>الدبلوم المتوسط في إدارة الموارد البشرية – جامعة الملك سعود</b>
 <b>الرؤية العامة:</b>
-يهدف البرنامج إلى تأهيل الطلاب علمياً وعملياً لسوق العمل في هذا المجال، بتزويدهم بالمعارف والمهارات اللازمة للأداء بكفاءة وفعالية، بما يتوافق مع احتياجات سوق العمل السعودي.
+يهدف البرنامج إلى تأهيل الطلاب علمياً وعملياً لسوق العمل في هذا المجال، بتزويدهم بالالمعارف والمهارات اللازمة للأداء بكفاءة وفعالية، بما يتوافق مع احتياجات سوق العمل السعودي.
 \n\n<b>🎯 الأهداف:</b>
-• تزويد الطلاب بالمعارف والمهارات في إدارة الموارد البشرية.
+• تزويد الطلاب بالالمعارف والمهارات في إدارة الموارد البشرية.
 • غرس السلوكيات والأخلاقيات المهنية.
 • مواكبة احتياجات سوق العمل لتعزيز فرص التوظيف.
 • تحسين جودة البرنامج بما يتماشى مع معايير الاعتماد.
@@ -451,7 +470,7 @@ h.alshareef@cfy.ksu.edu.sa
 \n\n<b>💼 الفرص الوظيفية:</b>
 • العمل في القطاع الحكومي، الخاص، والمنظمات غير الربحية، في مجالات: التوظيف والتدريب، استراتيجيات الموارد البشرية، تخطيط القوى العاملة، التعويضات، إدارة أنشطة التوظيف، تطوير المسار الوظيفي، والعلاقات العمالية.
 """,
-            "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في إدارة الموارد البشرية: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%AA%D9%82%D9%86%D9%8A%D8%A9_%D8%A7%D9%84%D9%86%D8%B8%D8%A7%D8%B1%D8%A7%D8%AA\">عرض الخطة</a>" # الرابط الأصلي يشير إلى "تقنية النظارات"
+            "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في إدارة الموارد البشرية: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%AA%D9%82%D9%86%D9%8A%D8%A9_%D8%A7%D9%84%D9%86%D8%B8%D8%A7%D8%B1%D8%A7%D8%AA\">عرض الخطة</a>"
         },
         "دبلوم المحاسبة الضريبية": {
             "menu_text": "الرجاء اختيار: ",
@@ -483,8 +502,6 @@ h.alshareef@cfy.ksu.edu.sa
 • تدريب العاملين على أخلاقيات ترجمة لغة الإشارة.
 • تقديم مرجعية علمية واستشارية لبرامج لغة الإشارة.
 • تمكين البرنامج ليكون المرجع الرئيسي لإعداد وتدريب العاملين مع الصم.
-• التنسيق مع الجهات المعنية لتقديم دورات تدريبية مستمرة.
-• منح تراخيص لمترجمي لغة الإشارة.
 \n\n<b>💼 الفرص الوظيفية:</b>
 • مرشدين ومترجمين في المعارض والمؤتمرات.
 • العمل في المؤسسات الإعلامية وقنوات التلفزيون.
@@ -492,7 +509,6 @@ h.alshareef@cfy.ksu.edu.sa
 • التوظيف في المحاكم والجهات القانونية.
 • العمل في الجهات الحكومية والخدمية والقطاع الخاص.
 • العمل في مراكز خدمات الصم وضعاف السمع.
-• العمل في الجهات التعليمية.
 """,
             "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في الترجمة بلغة الإشارة: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>",
             "وصف المقررات": "وصف المقررات الدراسية للدبلوم المتوسط في السكرتارية الطبية (الجديدة): <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/wsf_mqrrt_dblwm_lskrtry_ltby.pdf\">عرض الوصف</a>"
@@ -611,13 +627,6 @@ h.alshareef@cfy.ksu.edu.sa
 •   القدرة على تحليل البيانات المالية، التنبؤ بالمخاطر، وحل القضايا المالية.
 •   الالتزام بالأخلاقيات المهنية والعمل الجماعي.
 •   إتقان الاتصال الشفهي والكتابي، استخدام التحليل الكمي، وتوظيف الحاسب الآلي في المهام المالية.
-\n\n<b>💼 الفرص الوظيفية:</b>
-يشمل العمل في:
-•   المنشآت الاقتصادية، البنوك (تجارية وإسلامية)، شركات التأمين، البنك المركزي السعودي، مكاتب الصرافة.
-•   القطاعات المالية بالجهات الحكومية، وزارة المالية.
-\n<b>أمثلة للوظائف:</b>
-•   أمين صندوق، مأمور صرف، مساعد مدير مالي، مراقب مالي، مدقق حسابات، محصل إيرادات، مراقب تجاري.
-وغيرها من الوظائف ذات الصلة بالمجال المالي والمصرفي.
 """,
             "الخطة الدراسية": "◆ الخطة الدراسية للدبلوم المتوسط في الإدارة المالية والمصرفية: <a href=\"https://drive.google.com/file/d/11Re6r3MibiqyMxrlg0jh-X_SZGrOu5Cb/view?usp=drivesdk\">عرض الخطة الدراسية</a>",
             "وصف المقررات": "◆ وصف مقررات دبلوم الإدارة المالية والمصرفية <a href=\"https://drive.google.com/file/d/11OtBZQauC278G2cqTkh2fSruXLHrqlf3/view?usp=drivesdk\">عرض الوصف</a>"
@@ -685,8 +694,7 @@ h.alshareef@cfy.ksu.edu.sa
 <b>🛠 ️ المخرجات المهارية:</b>
 • العمل بكفاءة ضمن فرق أو بشكل فردي.
 • الالتزام بالمعايير الأخلاقية في التسويق.
-• التواصل الفعّال كتابيًا وشفويًا باستخدام التقنية.
-• استخدام التحليل الكمي والبيانات في حل المشكلات.
+• التواصل الفّعّال كتابيًا وشفويًا باستخدام التقنية.
 <b>💼 الفرص الوظيفية:</b>
 يمكن لخريجي الدبلوم العمل في القطاعين الحكومي والخاص في الوظائف التالية:
 • مأمور مبيعات
@@ -717,7 +725,7 @@ h.alshareef@cfy.ksu.edu.sa
 ✍️ دمتم بود وتوفيق دائم بإذن الله 🌿""",
         "كتب و ملخصات مواد الدبلوم عن بعد 📚 PDF": """قناه خاصه كتب وملخصات وتجميعات والاختبارات الذاتية مواد dبلوم جامعة سعودKSU) )
 📌 رابط قناة مستجدين دبلوم الملك سعود
-<a href="https://t.me/Diploma_New_1447">قناة مستجدين دبلوم الملك سعود</a>
+<a href="https://t.me/Diploma_New_1447">قروب مستجدين دبلوم الملك سعود</a>
 رابط القناة
 <a href="https://t.me/KDiplomasSU">قناة الكتب والملخصات</a>"""
     },
@@ -759,16 +767,12 @@ h.alshareef@cfy.ksu.edu.sa
 
 📌مبادئ الادارة المالية: <a href="https://t.me/Management_1447">اضغط هنا للانضمام</a>
 
-📌 اللياقة والثقافة والصحية: <a href="https://t.me/Fitness_culture_1447">اضغط هنا للانضمام</a>
-
-📌مبادئ إدارة الأعمال: <a href="https://t.me/Management_3352">اضغط هنا للانضمام</a>
-
 ♻️كتب وملخصات مواد الدبلوم: <a href="https://t.me/KDiplomasSU">اضغط هنا للانضمام</a>
 
 ⚜️قناة أخبار الدبلوم⚜️: <a href="https://t.me/KSDN_222">اضغط هنا للانضمام</a>
 
 <b>...............................</b>
-""",       
+""",
     "كتب وملخصات مواد الدبلوم": {
         "menu_text": "الرجاء اختيار المستوى الدراسي:",
         "options": [
@@ -859,8 +863,7 @@ h.alshareef@cfy.ksu.edu.sa
 • 🔸 جامعة الملك سعود (الملز): <a href="https://maps.app.goo.gl/4bnaxNA8vMDRSp9D7">عرض على الخريطة</a>
 • 🔸 جامعة الملك سعود (الوشم - عيال): <a href="https://maps.app.com/sCo9BkV1WaEeXVGa8?g_st=it">عرض على الخريطة</a>
 • 🔸 جامعة الملك سعود (المدينة الجامعية للطالبات): <a href="https://maps.me/EZcL9XVz1w8UomYF6?g_st=ic">عرض على الخريطة</a>""",
-    "شروط التجسير في جامعة الملك سعود": """شروط التجسير في جامعة الملك سعود
-<a href="https://t.me/Diploma_Solutions/24">عرض الشروط على تيليجرام</a>""",
+    "شروط التجسير في جامعة الملك سعود": "شروط التجسير في جامعة الملك سعود\n<a href=\"https://t.me/Diploma_Solutions/24\">عرض الشروط على تيليجرام</a>",
     "🛑شرح استخدام – البلاك بورد / Blackboard 🛑": """✅️ كل ما تريد معرفته حول منصة التعليم عن بُعد البلاك بوورد تجده هنا:👇
 
 1. طريقة الدخول الى المحاضرة المباشرة: <a href="https://t.me/Diploma_Solutions/6">شرح الدخول</a>
@@ -889,31 +892,11 @@ h.alshareef@cfy.ksu.edu.sa
     }
 }
 
-# Helper function to create a ReplyKeyboardMarkup
-def create_keyboard(buttons):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # Check if the buttons list is a list of lists (for multiple rows) or a single list
-    if all(isinstance(button_row, list) for button_row in buttons):
-        for button_row in buttons:
-            markup.row(*button_row)
-    else:
-        for button in buttons:
-            markup.add(button)
-    return markup
-
-# Function to get the main keyboard
-def get_main_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(*left_commands)
-    for tab in right_tabs:
-        markup.add(tab)
-    return markup
-
-# --- رسالة ترحيب عند /start ---
+# --- /start ---
 @bot.message_handler(commands=['start'])
 def start_handler(message):
     chat_id = message.chat.id
-    user_states[chat_id] = "main_menu" # تعيين حالة المستخدم إلى القائمة الرئيسية
+    user_states[chat_id] = "main_menu"
     text = (
         "🔹 <b>ما الذي يمكن لهذا البوت تقديمه؟</b>\n\n"
         "هذا البوت مُخصص لطلاب <b>الدبلوم في جامعة الملك سعود</b>، ويهدف إلى:\n\n"
@@ -927,83 +910,52 @@ def start_handler(message):
         "قناة مساعدات طلاب الدبلوم 👇\n"
         "<a href=\"https://t.me/Diploma_Solutions\">اضغط هنا للانضمام للقناة</a>"
     )
-    # إضافة الروابط المائية
-text += "\n\n" + WATERMARK_TEXT
-bot.send_message(
-    chat_id,
-    text,
-    parse_mode="HTML",
-    disable_web_page_preview=True,
-    reply_markup=get_main_keyboard()
-)
+    send_with_watermark(chat_id, text, keyboard=get_main_keyboard())
 
-# --- التعامل مع أوامر اليسار (star, help) ---
+# --- star & help ---
 @bot.message_handler(func=lambda m: m.text in left_commands)
 def left_command_handler(message):
     chat_id = message.chat.id
     text = message.text
 
     if text == "star":
-    reply = (
-        "<b>ما الذي يمكن لهذا البوت تقديمه؟</b>\n\n"
-        "هذا البوت مُخصص لطلاب وطالبات الدبلوم في جامعة الملك سعود ويهدف إلى:\n\n"
-        "• توفير المعلومات الدراسية بسهولة وسرعة.\n"
-        "• مساعدة الطالب في الوصول لكل ما يحتاجه من روابط ومصادر مهمة.\n"
-        "• تقليل الوقت والجهد المبذول في البحث.\n"
-        "• تجميع كل ما يهم الطالب في مكان واحد.\n\n"
-        "اضغط على الأوامر الموجودة في القائمة أدناه لتحصل على كل ما تحتاجه\n\n"
-        "🎯 نأمل أن تنال خدمتنا رضاكم وأن نكون عند حسن ظنكم…"
-    )
+        reply = (
+            "<b>ما الذي يمكن لهذا البوت تقديمه؟</b>\n\n"
+            "هذا البوت مُخصص لطلاب وطالبات الدبلوم في جامعة الملك سعود ويهدف إلى:\n"
+            "• توفير المعلومات الدراسية بسهولة وسرعة.\n"
+            "• مساعدة الطالب في الوصول لكل ما يحتاجه من روابط ومصادر مهمة.\n"
+            "• تقليل الوقت والجهد المبذول في البحث.\n"
+            "• تجميع كل ما يهم الطالب في مكان واحد.\n\n"
+            "اضغط على الأوامر الموجودة في القائمة أدناه لتحصل على كل ما تحتاجه\n\n"
+            "🎯 نأمل أن تنال خدمتنا رضاكم وأن نكون عند حسن ظنكم…"
+        )
+        send_with_watermark(chat_id, reply, keyboard=get_main_keyboard())
 
-elif text == "help":
-    reply = "فيديو شرح استخدام البوت سيتوفر قريبًا"
+    elif text == "help":
+        reply = "فيديو شرح استخدام البوت سيتوفر قريبًا"
+        send_with_watermark(chat_id, reply, keyboard=get_main_keyboard())
 
-reply += WATERMARK_TEXT
-
-bot.send_message(
-    chat_id,
-    reply,
-    parse_mode="HTML",
-    reply_markup=get_main_keyboard(),
-    disable_web_page_preview=True
-)
-    
 # --- معالج عام لجميع أنواع الرسائل (نص، صور، مستندات) ---
-# يجب أن يكون هذا المعالج في النهاية لكي لا يتعارض مع الأوامر الأخرى مثل /start
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'document'])
 def handle_all_messages(message):
     chat_id = message.chat.id
-    user_text = message.text # النص المرفق مع الرسالة أو نص الرسالة نفسها
-    current_state = user_states.get(chat_id, "main_menu") # الحصول على حالة المستخدم الحالية
+    user_text = message.text
+    current_state = user_states.get(chat_id, "main_menu")
 
-    # --- معالجة وضع الدردشة مع الذكاء الاصطناعي ---
-if current_state == "ai_chat_active":
-    if message.text == "🔙 رجوع":
-        user_states[chat_id] = "main_menu"
+    # --- وضع الدردشة مع الذكاء الاصطناعي ---
+    if current_state == "ai_chat_active":
+        if message.text == "🔙 رجوع":
+            user_states[chat_id] = "main_menu"
+            reply_text = "تم الخروج من وضع الدردشة مع الذكاء الاصطناعي. أهلاً بك في القائمة الرئيسية."
+            send_with_watermark(chat_id, reply_text, keyboard=get_main_keyboard())
+            return
 
-        reply_text = (
-            "تم الخروج من وضع الدردشة مع الذكاء الاصطناعي. "
-            "أهلاً بك في القائمة الرئيسية."
-        )
-        reply_text += "\n\n" + WATERMARK_TEXT  # إضافة الروابط المائية
-
-        bot.send_message(
-            chat_id,
-            reply_text,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_markup=get_main_keyboard()
-        )
-        return
-
-    bot.send_chat_action(chat_id, 'typing')
+        bot.send_chat_action(chat_id, 'typing')
 
         prompt_parts = []
-        # إضافة النص إذا كان موجوداً في الرسالة
-        if message.text and message.text != "🤖 اسأل الذكاء الاصطناعي": # تجنب إضافة اسم الزر نفسه كمطالبة
+        if message.text and message.text != "🤖 اسأل الذكاء الاصطناعي":
             prompt_parts.append({"text": message.text})
 
-        # معالجة الصور
         if message.photo:
             file_id = message.photo[-1].file_id
             try:
@@ -1014,61 +966,38 @@ if current_state == "ai_chat_active":
                 elif file_info.file_path.lower().endswith(".gif"): mime_type = "image/gif"
                 encoded_image = base64.b64encode(downloaded_file).decode('utf-8')
                 prompt_parts.append({"inlineData": {"mimeType": mime_type, "data": encoded_image}})
-                if not message.text: prompt_parts.append({"text": "ماذا يوجد في هذه الصورة؟"})
+                if not message.text:
+                    prompt_parts.append({"text": "ماذا يوجد في هذه الصورة؟"})
             except Exception as e:
                 print(f"ERROR: Failed to process photo: {e}")
                 bot.send_message(chat_id, f"عذراً، حدث خطأ أثناء معالجة الصورة: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
                 return
-        
+
         elif message.document:
             bot.send_message(chat_id, "عذراً، لا أستطيع معالجة المستندات (مثل PDF أو Word) بواسطة الذكاء الاصطناعي حالياً. يمكنني فقط فهم النصوص والصور.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
             return
 
         if not prompt_parts:
-    reply_text = "الرجاء إرسال نص أو صورة لأقوم بمعالجتها."
-    reply_text += "\n\n" + WATERMARK_TEXT  # إضافة الروابط المائية
-
-    bot.send_message(
-        chat_id,
-        reply_text,
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
-    )
-    return
+            reply_text = "الرجاء إرسال نص أو صورة لأقوم بمعالجتها."
+            send_with_watermark(chat_id, reply_text, keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            return
 
         try:
-    ai_response = get_gemini_multimodal_response(prompt_parts)
-    ai_response += "\n\n" + WATERMARK_TEXT  # إضافة الروابط المائية
+            ai_response = get_gemini_multimodal_response(prompt_parts)
+            # تأكد من أن نص الـ AI لا يحتوي Markdown — إن احتجت تنظيفًا إضافيًا أضفه هنا
+            send_with_watermark(chat_id, ai_response, keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+        except requests.exceptions.RequestException as e:
+            print(f"ERROR: Gemini API request failed: {e}")
+            bot.send_message(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+        except Exception as e:
+            print(f"ERROR: Unexpected error in AI chat: {e}")
+            bot.send_message(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+        return
 
-    bot.send_message(
-        chat_id,
-        ai_response,
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
-    )
-except requests.exceptions.RequestException as e:
-    print(f"ERROR: Gemini API request failed: {e}")
-    bot.send_message(
-        chat_id,
-        f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}",
-        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
-    )
-except Exception as e:
-    print(f"ERROR: Unexpected error in AI chat: {e}")
-    bot.send_message(
-        chat_id,
-        "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.",
-        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
-    )
-return
-
-
-    # --- معالجة القوائم العادية إذا لم يكن المستخدم في وضع الذكاء الاصطناعي ---
+    # --- معالجة القوائم العادية ---
     reply_text = "عذراً، لم أفهم طلبك. الرجاء استخدام الأزرار."
     reply_markup = get_main_keyboard()
-    add_watermark = True # متغير لتحديد ما إذا كان يجب إضافة الروابط المائية
+    add_watermark = True
 
     if user_text == "🔙 رجوع":
         if current_state.startswith("حضوري_sub_sub_menu_"):
@@ -1099,6 +1028,7 @@ return
             user_states[chat_id] = "main_menu"
             reply_text = "أنت بالفعل في القائمة الرئيسية."
             reply_markup = get_main_keyboard()
+
     elif current_state == "main_menu":
         if user_text == "🤖 اسأل الذكاء الاصطناعي":
             user_states[chat_id] = "ai_chat_active"
@@ -1109,9 +1039,12 @@ return
             if isinstance(content_item, dict) and "options" in content_item:
                 reply_text = content_item["menu_text"]
                 reply_markup = create_keyboard(content_item["options"])
-                if user_text == "تخصصات برامج الدبلوم - حضوري": user_states[chat_id] = "حضوري_sub_menu"
-                elif user_text == "تخصصات برامج الدبلوم - عن بُعد": user_states[chat_id] = "عن_بعد_sub_menu"
-                elif user_text == "كتب وملخصات مواد الدبلوم": user_states[chat_id] = "books_menu"
+                if user_text == "تخصصات برامج الدبلوم - حضوري":
+                    user_states[chat_id] = "حضوري_sub_menu"
+                elif user_text == "تخصصات برامج الدبلوم - عن بُعد":
+                    user_states[chat_id] = "عن_بعد_sub_menu"
+                elif user_text == "كتب وملخصات مواد الدبلوم":
+                    user_states[chat_id] = "books_menu"
             else:
                 reply_text = content_item
                 reply_markup = get_main_keyboard()
@@ -1119,6 +1052,7 @@ return
             reply_text = "عذراً، هذا التبويب غير موجود. الرجاء استخدام الأزرار."
             reply_markup = get_main_keyboard()
             add_watermark = False
+
     elif current_state == "حضوري_sub_menu":
         if user_text in bot_content["تخصصات برامج الدبلوم - حضوري"]:
             content_item = bot_content["تخصصات برامج الدبلوم - حضوري"][user_text]
@@ -1133,16 +1067,18 @@ return
             reply_text = "عذراً، هذا التخصص غير موجود في قائمة الدبلوم الحضوري. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["تخصصات برامج الدبلوم - حضوري"]["options"])
             add_watermark = False
+
     elif current_state.startswith("حضوري_sub_sub_menu_"):
         parent_menu_key = current_state.replace("حضوري_sub_sub_menu_", "")
         menu_dict = bot_content["تخصصات برامج الدبلوم - حضوري"].get(parent_menu_key, {})
         if isinstance(menu_dict, dict) and user_text in menu_dict:
             reply_text = menu_dict[user_text]
-            reply_markup = create_keyboard(menu_dict["options"])
+            reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
             add_watermark = False
+
     elif current_state == "عن_بعد_sub_menu":
         if user_text in bot_content["تخصصات برامج الدبلوم - عن بُعد"]:
             content_item = bot_content["تخصصات برامج الدبلوم - عن بُعد"][user_text]
@@ -1157,16 +1093,18 @@ return
             reply_text = "عذراً، هذا الخيار غير موجود في قائمة الدبلوم عن بُعد. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["تخصصات برامج الدبلوم - عن بُعد"]["options"])
             add_watermark = False
+
     elif current_state.startswith("عن_بعد_sub_sub_menu_"):
         parent_menu_key = current_state.replace("عن_بعد_sub_sub_menu_", "")
         menu_dict = bot_content["تخصصات برامج الدبلوم - عن بُعد"].get(parent_menu_key, {})
         if isinstance(menu_dict, dict) and user_text in menu_dict:
             reply_text = menu_dict[user_text]
-            reply_markup = create_keyboard(menu_dict["options"])
+            reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
             add_watermark = False
+
     elif current_state == "books_menu":
         if user_text in bot_content["كتب وملخصات مواد الدبلوم"]:
             content_item = bot_content["كتب وملخصات مواد الدبلوم"][user_text]
@@ -1178,6 +1116,7 @@ return
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"]["options"])
             add_watermark = False
+
     elif current_state.startswith("books_sub_menu_"):
         parent_menu_key = current_state.replace("books_sub_menu_", "")
         if parent_menu_key in bot_content["كتب وملخصات مواد الدبلوم"] and user_text == "🔙 رجوع":
@@ -1186,30 +1125,18 @@ return
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"]["options"])
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
-            reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"][parent_menu_key]["options"])
+            reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"].get(parent_menu_key, {}).get("options", ["🔙 رجوع"]))
             add_watermark = False
-            
-    # إضافة الروابط المائية في النهاية إذا كان مطلوبًا
-if add_watermark:
-    reply_text += "\n\n" + WATERMARK_TEXT
 
-try:
-    bot.send_message(
-        chat_id,
-        reply_text,
-        parse_mode="HTML",
-        reply_markup=reply_markup,
-        disable_web_page_preview=True
-    )
-except telebot.apihelper.ApiTelegramException as e:
-    print(f"ERROR: Failed to send message to {chat_id}: {e}")
-    bot.send_message(
-        chat_id,
-        "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.",
-        parse_mode="HTML",
-        reply_markup=reply_markup,
-        disable_web_page_preview=True
-    )
+    # إرسال النتيجة: إما مع العلامة المائية أو بدونها حسب المتغير
+    try:
+        if add_watermark:
+            send_with_watermark(chat_id, reply_text, keyboard=reply_markup)
+        else:
+            bot.send_message(chat_id, reply_text, parse_mode="HTML", reply_markup=reply_markup, disable_web_page_preview=True)
+    except telebot.apihelper.ApiTelegramException as e:
+        print(f"ERROR: Failed to send message to {chat_id}: {e}")
+        bot.send_message(chat_id, "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.", parse_mode="HTML", reply_markup=reply_markup)
 
 # --- معالج طلبات الـ Webhook من Telegram ---
 @app.route(f'/{TOKEN}', methods=['POST'])
@@ -1232,10 +1159,6 @@ def index():
     except Exception as e:
         return f'Failed to set webhook: {e}', 500
 
-# هذا الجزء لا يجب تشغيله مباشرة إذا كنت تستخدم Gunicorn
-# Gunicorn هو من سيستدعي app.run()
+# التشغيل المحلي لاختبار فقط (Gunicorn سيستدعي التطبيق على Render)
 if __name__ == '__main__':
     print("Bot is ready. If running locally, use app.run(). For Render, Gunicorn handles it.")
-    # للتشغيل المحلي للاختبار (ليس للنشر على Render)
-    # bot.remove_webhook()
-    # app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
