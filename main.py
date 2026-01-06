@@ -928,8 +928,14 @@ def start_handler(message):
         "<a href=\"https://t.me/Diploma_Solutions\">اضغط هنا للانضمام للقناة</a>"
     )
     # إضافة الروابط المائية
-    text += WATERMARK_TEXT
-    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=get_main_keyboard())
+text += "\n\n" + WATERMARK_TEXT
+bot.send_message(
+    chat_id,
+    text,
+    parse_mode="HTML",
+    disable_web_page_preview=True,
+    reply_markup=get_main_keyboard()
+)
 
 # --- التعامل مع أوامر اليسار (star, help) ---
 @bot.message_handler(func=lambda m: m.text in left_commands)
@@ -971,15 +977,26 @@ def handle_all_messages(message):
     current_state = user_states.get(chat_id, "main_menu") # الحصول على حالة المستخدم الحالية
 
     # --- معالجة وضع الدردشة مع الذكاء الاصطناعي ---
-    if current_state == "ai_chat_active":
-        if message.text == "🔙 رجوع":
-            user_states[chat_id] = "main_menu"
-            reply_text = "تم الخروج من وضع الدردشة مع الذكاء الاصطناعي. أهلاً بك في القائمة الرئيسية."
-            reply_text += WATERMARK_TEXT # إضافة الروابط المائية
-            bot.send_message(chat_id, reply_text, parse_mode="HTML", reply_markup=get_main_keyboard())
-            return
+if current_state == "ai_chat_active":
+    if message.text == "🔙 رجوع":
+        user_states[chat_id] = "main_menu"
 
-        bot.send_chat_action(chat_id, 'typing') # إظهار حالة "يكتب..." للمستخدم
+        reply_text = (
+            "تم الخروج من وضع الدردشة مع الذكاء الاصطناعي. "
+            "أهلاً بك في القائمة الرئيسية."
+        )
+        reply_text += "\n\n" + WATERMARK_TEXT  # إضافة الروابط المائية
+
+        bot.send_message(
+            chat_id,
+            reply_text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+    bot.send_chat_action(chat_id, 'typing')
 
         prompt_parts = []
         # إضافة النص إذا كان موجوداً في الرسالة
@@ -1008,22 +1025,45 @@ def handle_all_messages(message):
             return
 
         if not prompt_parts:
-            reply_text = "الرجاء إرسال نص أو صورة لأقوم بمعالجتها."
-            reply_text += WATERMARK_TEXT # إضافة الروابط المائية
-            bot.send_message(chat_id, reply_text, parse_mode="HTML", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
-            return
+    reply_text = "الرجاء إرسال نص أو صورة لأقوم بمعالجتها."
+    reply_text += "\n\n" + WATERMARK_TEXT  # إضافة الروابط المائية
+
+    bot.send_message(
+        chat_id,
+        reply_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
+    )
+    return
 
         try:
-            ai_response = get_gemini_multimodal_response(prompt_parts)
-            ai_response += WATERMARK_TEXT # إضافة الروابط المائية
-            bot.send_message(chat_id, ai_response, parse_mode="HTML", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
-        except requests.exceptions.RequestException as e:
-            print(f"ERROR: Gemini API request failed: {e}")
-            bot.send_message(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
-        except Exception as e:
-            print(f"ERROR: Unexpected error in AI chat: {e}")
-            bot.send_message(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
-        return
+    ai_response = get_gemini_multimodal_response(prompt_parts)
+    ai_response += "\n\n" + WATERMARK_TEXT  # إضافة الروابط المائية
+
+    bot.send_message(
+        chat_id,
+        ai_response,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
+    )
+except requests.exceptions.RequestException as e:
+    print(f"ERROR: Gemini API request failed: {e}")
+    bot.send_message(
+        chat_id,
+        f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}",
+        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
+    )
+except Exception as e:
+    print(f"ERROR: Unexpected error in AI chat: {e}")
+    bot.send_message(
+        chat_id,
+        "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.",
+        reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
+    )
+return
+
 
     # --- معالجة القوائم العادية إذا لم يكن المستخدم في وضع الذكاء الاصطناعي ---
     reply_text = "عذراً، لم أفهم طلبك. الرجاء استخدام الأزرار."
@@ -1150,14 +1190,26 @@ def handle_all_messages(message):
             add_watermark = False
             
     # إضافة الروابط المائية في النهاية إذا كان مطلوبًا
-    if add_watermark:
-        reply_text += WATERMARK_TEXT
+if add_watermark:
+    reply_text += "\n\n" + WATERMARK_TEXT
 
-    try:
-        bot.send_message(chat_id, reply_text, parse_mode="HTML", reply_markup=reply_markup, disable_web_page_preview=True)
-    except telebot.apihelper.ApiTelegramException as e:
-        print(f"ERROR: Failed to send message to {chat_id}: {e}")
-        bot.send_message(chat_id, "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.", parse_mode="HTML", reply_markup=reply_markup)
+try:
+    bot.send_message(
+        chat_id,
+        reply_text,
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True
+    )
+except telebot.apihelper.ApiTelegramException as e:
+    print(f"ERROR: Failed to send message to {chat_id}: {e}")
+    bot.send_message(
+        chat_id,
+        "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.",
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True
+    )
 
 # --- معالج طلبات الـ Webhook من Telegram ---
 @app.route(f'/{TOKEN}', methods=['POST'])
