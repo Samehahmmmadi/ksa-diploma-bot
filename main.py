@@ -1,5 +1,4 @@
 import os
-import re
 from flask import Flask, request, abort
 import telebot
 from telebot import types
@@ -10,7 +9,7 @@ import base64
 # --- إعدادات البوت والـ API ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
-    raise ValueError("⚠️ متغير البيئة TELEGRAM_TOKEN غير موجود. الرجاء إضافته في إعدادات Render.")
+    raise ValueError("⚠️ متغير البيئة TELEGRAM_TOKEN غير موجود.")
 
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML', threaded=False)
 app = Flask(__name__)
@@ -22,39 +21,15 @@ if RENDER_EXTERNAL_URL_BASE:
     RENDER_WEBHOOK_URL = f"{RENDER_EXTERNAL_URL_BASE}{TOKEN}"
 else:
     RENDER_WEBHOOK_URL = "https://your-deployed-app-url.com/" + TOKEN
-    print("⚠️ تحذير: متغير البيئة RENDER_EXTERNAL_URL غير موجود. تأكد من أن RENDER_WEBHOOK_URL صحيح.")
+    print("⚠️ تحذير: متغير البيئة RENDER_EXTERNAL_URL غير موجود.")
 
 # إعدادات واجهة برمجة تطبيقات Gemini
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 GEMINI_API_KEY = "AIzaSyAMTPehz-r1y1V2TKyNeItcjkFDxFvwJ1c"
 
 # ------------------------------------------------------------------
-# دوال تنظيف ونقل آمن للرسائل
+# ✅ دالة واحدة فقط للإرسال - هذه هي القاعدة الذهبية
 # ------------------------------------------------------------------
-def _remove_whatsapp_links_from_text(text: str) -> str:
-    """
-    تزيل روابط واتساب من النص نهائيًا.
-    """
-    if not text:
-        return text
-    
-    # أنماط روابط الواتساب الشائعة
-    patterns = [
-        r'https?://(?:www\.)?(?:chat\.whatsapp\.com|wa\.me|api\.whatsapp\.com|whatsapp\.com|wa\.link)[^\s]*',
-        r'روابط مجتمعات[^\n]*',
-        r'🔗[^\n]*واتساب[^\n]*',
-        r'📲[^\n]*واتساب[^\n]*'
-    ]
-    
-    cleaned = text
-    for pattern in patterns:
-        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-    
-    # إزالة أي فراغات زائدة بعد الحذف
-    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
-    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-    
-    return cleaned
 
 def get_whatsapp_buttons():
     """ترجع InlineKeyboardMarkup يحتوي أزرار مجتمعات الواتساب"""
@@ -66,7 +41,6 @@ def get_whatsapp_buttons():
     btn4 = types.InlineKeyboardButton("👥 دبلوم موارد بشرية", url="https://chat.whatsapp.com/HenxzVBDwBb8ypl1VWonfb")
     btn5 = types.InlineKeyboardButton("⚖️ تجارب وآراء الدكاترة والشعب", url="https://chat.whatsapp.com/L4cxz9XYEXHI3eCG5WZYLx")
 
-    # صف كل زر في سطر منفصل
     markup.add(btn1)
     markup.add(btn2)
     markup.add(btn3)
@@ -75,32 +49,36 @@ def get_whatsapp_buttons():
 
     return markup
 
-def send_with_buttons(chat_id, text, reply_keyboard=None, include_whatsapp=True):
+def send_unified_message(chat_id, text, reply_keyboard=None, include_whatsapp=True):
     """
-    الدالة الموحدة للإرسال - ترسل دائمًا مع أزرار واتساب شفافة
+    ❗ الدالة الوحيدة المسموح بها للإرسال في البوت كله
+    القاعدة: لا توجد روابط واتساب في النصوص، فقط أزرار شفافة
     """
-    # تنظيف النص من أي روابط واتساب
-    clean_text = _remove_whatsapp_links_from_text(text)
-    
-    # أرسل الرسالة الأساسية
-    bot.send_message(
-        chat_id,
-        clean_text,
-        parse_mode="HTML",
-        reply_markup=reply_keyboard,
-        disable_web_page_preview=True
-    )
-
-    # أرسل أزرار واتساب الشفافة في رسالة منفصلة
-    if include_whatsapp:
-        whatsapp_header = "<b>🔗 روابط مجتمعات الواتساب:</b>"
+    # 1. إرسال الرسالة الأساسية (النص النظيف)
+    try:
         bot.send_message(
             chat_id,
-            whatsapp_header,
+            text,
             parse_mode="HTML",
-            reply_markup=get_whatsapp_buttons(),
+            reply_markup=reply_keyboard,
             disable_web_page_preview=True
         )
+    except Exception as e:
+        print(f"ERROR sending main message: {e}")
+        return
+
+    # 2. إرسال أزرار واتساب منفصلة إذا طُلب
+    if include_whatsapp:
+        try:
+            bot.send_message(
+                chat_id,
+                "<b>🔗 روابط مجتمعات الواتساب:</b>",
+                parse_mode="HTML",
+                reply_markup=get_whatsapp_buttons(),
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            print(f"ERROR sending WhatsApp buttons: {e}")
 
 # ------------------------------------------------------------------
 # القوائم والـ state والدوال المساعدة
@@ -124,9 +102,8 @@ right_tabs = [
     "🤖 اسأل الذكاء الاصطناعي"
 ]
 
-user_states = {}  # {chat_id: current_menu_key}
+user_states = {}
 
-# --- دوال مساعدة للوحة المفاتيح ---
 def create_keyboard(buttons):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     if all(isinstance(button_row, list) for button_row in buttons):
@@ -147,7 +124,7 @@ def get_main_keyboard():
 # --- دالة استدعاء Gemini ---
 def get_gemini_multimodal_response(parts):
     if not GEMINI_API_KEY:
-        return "عذراً، لا يمكنني التواصل مع الذكاء الاصطناعي حالياً. مفتاح الـ API غير متوفر."
+        return "عذراً، لا يمكنني التواصل مع الذكاء الاصطناعي حالياً."
 
     payload = {
         "contents": [
@@ -160,18 +137,21 @@ def get_gemini_multimodal_response(parts):
     headers = {'Content-Type': 'application/json'}
     params = {'key': GEMINI_API_KEY}
 
-    response = requests.post(GEMINI_API_URL, headers=headers, params=params, data=json.dumps(payload))
-    response.raise_for_status()
-    result = response.json()
+    try:
+        response = requests.post(GEMINI_API_URL, headers=headers, params=params, data=json.dumps(payload))
+        response.raise_for_status()
+        result = response.json()
 
-    if result.get("candidates") and result["candidates"][0].get("content") and result["candidates"][0]["content"].get("parts"):
-        return result["candidates"][0]["content"]["parts"][0]["text"]
-    else:
-        print(f"ERROR: Unexpected Gemini API response structure: {result}")
-        return "عذراً، لم أتمكن من الحصول على إجابة واضحة من الذكاء الاصطناعي."
+        if result.get("candidates") and result["candidates"][0].get("content") and result["candidates"][0]["content"].get("parts"):
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return "عذراً، لم أتمكن من الحصول على إجابة واضحة."
+    except Exception as e:
+        print(f"Gemini API error: {e}")
+        return "عذراً، حدث خطأ أثناء الاتصال بالذكاء الاصطناعي."
 
 # ------------------------------------------------------------------
-# كامل bot_content (بدون روابط واتساب مائية)
+# كامل bot_content (بدون روابط واتساب في النصوص)
 # ------------------------------------------------------------------
 bot_content = {
     "تقويم عام 1447ه‍.": "<b>🔹 التقويم الأكاديمي لجامعة الملك سعود للعام الدراسي 2025 / 2026م (1447هـ):</b>\n\n<a href=\"https://t.me/KSDN_222/85\">اضغط هنا لمشاهدة التقويم الأكاديمي 👇</a>",
@@ -569,7 +549,7 @@ h.alshareef@cfy.ksu.edu.sa
 \n\n<b>💼 الفرص الوظيفية:</b>
 • مقدمات رعاية الأطفال في الحضانات، مديرات الحضانة، مشرفات على الحضانة.
 """,
-            "الخطة الدراسية": "الخطة الدراسية لدبلوم المشارك لمقدمي الرعاية بالحضانات: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D9%85%D9%82%D8%AF%D9%85%D9%8A_%D8%A7%D9%84%D8%B1%D8%B9%D8%A7%D9%8A%D8%A9.pdf\">عرض الخطة</a>"
+            "الخطة الدراسية": "الخطة الدراسية لدبلوم المشارك لمقدمي الرعاية بالحضانات: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D9%85%D9%82%D8%AF%D9%85%D9%8A_%D8%A7%D9%84%D8%B1%D8%B8%D8%A7%D9%8A%D8%A9.pdf\">عرض الخطة</a>"
         },
         "دبلوم اللغة الصينية": {
             "menu_text": "الرجاء اختيار: ",
@@ -934,24 +914,10 @@ h.alshareef@cfy.ksu.edu.sa
     }
 }
 
-# تنظيف جميع المحتويات من روابط الواتساب
-def sanitize_content(content):
-    if isinstance(content, dict):
-        return {k: sanitize_content(v) for k, v in content.items()}
-    elif isinstance(content, list):
-        return [sanitize_content(item) for item in content]
-    elif isinstance(content, str):
-        return _remove_whatsapp_links_from_text(content)
-    else:
-        return content
-
-bot_content = sanitize_content(bot_content)
-
 # ------------------------------------------------------------------
-# Handlers
+# Handlers - كلها تستخدم دالة الإرسال الموحدة
 # ------------------------------------------------------------------
 
-# --- /start ---
 @bot.message_handler(commands=['start'])
 def start_handler(message):
     chat_id = message.chat.id
@@ -969,9 +935,8 @@ def start_handler(message):
         "قناة مساعدات طلاب الدبلوم 👇\n"
         "<a href=\"https://t.me/Diploma_Solutions\">اضغط هنا للانضمام للقناة</a>"
     )
-    send_with_buttons(chat_id, text, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
+    send_unified_message(chat_id, text, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
 
-# --- star & help ---
 @bot.message_handler(func=lambda m: m.text in left_commands)
 def left_command_handler(message):
     chat_id = message.chat.id
@@ -988,13 +953,12 @@ def left_command_handler(message):
             "اضغط على الأوامر الموجودة في القائمة أدناه لتحصل على كل ما تحتاجه\n\n"
             "🎯 نأمل أن تنال خدمتنا رضاكم وأن نكون عند حسن ظنكم…"
         )
-        send_with_buttons(chat_id, reply, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
+        send_unified_message(chat_id, reply, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
 
     elif text == "help":
         reply = "فيديو شرح استخدام البوت سيتوفر قريبًا"
-        send_with_buttons(chat_id, reply, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
+        send_unified_message(chat_id, reply, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
 
-# --- معالج عام لجميع أنواع الرسائل ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'document'])
 def handle_all_messages(message):
     chat_id = message.chat.id
@@ -1005,8 +969,8 @@ def handle_all_messages(message):
     if current_state == "ai_chat_active":
         if message.text == "🔙 رجوع":
             user_states[chat_id] = "main_menu"
-            reply_text = "تم الخروج من وضع الدردشة مع الذكاء الاصطناعي. أهلاً بك في القائمة الرئيسية."
-            send_with_buttons(chat_id, reply_text, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
+            send_unified_message(chat_id, "تم الخروج من وضع الدردشة مع الذكاء الاصطناعي. أهلاً بك في القائمة الرئيسية.", 
+                               reply_keyboard=get_main_keyboard(), include_whatsapp=True)
             return
 
         bot.send_chat_action(chat_id, 'typing')
@@ -1029,27 +993,39 @@ def handle_all_messages(message):
                     prompt_parts.append({"text": "ماذا يوجد في هذه الصورة؟"})
             except Exception as e:
                 print(f"ERROR: Failed to process photo: {e}")
-                send_with_buttons(chat_id, f"عذراً، حدث خطأ أثناء معالجة الصورة: {e}", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
+                send_unified_message(chat_id, f"عذراً، حدث خطأ أثناء معالجة الصورة: {e}", 
+                                   reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), 
+                                   include_whatsapp=False)
                 return
 
         elif message.document:
-            send_with_buttons(chat_id, "عذراً، لا أستطيع معالجة المستندات (مثل PDF أو Word) بواسطة الذكاء الاصطناعي حالياً. يمكنني فقط فهم النصوص والصور.", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
+            send_unified_message(chat_id, "عذراً، لا أستطيع معالجة المستندات (مثل PDF أو Word) بواسطة الذكاء الاصطناعي حالياً. يمكنني فقط فهم النصوص والصور.", 
+                               reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), 
+                               include_whatsapp=False)
             return
 
         if not prompt_parts:
             reply_text = "الرجاء إرسال نص أو صورة لأقوم بمعالجتها."
-            send_with_buttons(chat_id, reply_text, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
+            send_unified_message(chat_id, reply_text, 
+                               reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), 
+                               include_whatsapp=False)
             return
 
         try:
             ai_response = get_gemini_multimodal_response(prompt_parts)
-            send_with_buttons(chat_id, ai_response, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
+            send_unified_message(chat_id, ai_response, 
+                               reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), 
+                               include_whatsapp=False)
         except requests.exceptions.RequestException as e:
             print(f"ERROR: Gemini API request failed: {e}")
-            send_with_buttons(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
+            send_unified_message(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", 
+                               reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), 
+                               include_whatsapp=False)
         except Exception as e:
             print(f"ERROR: Unexpected error in AI chat: {e}")
-            send_with_buttons(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
+            send_unified_message(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", 
+                               reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), 
+                               include_whatsapp=False)
         return
 
     # --- معالجة القوائم العادية ---
@@ -1091,7 +1067,7 @@ def handle_all_messages(message):
             user_states[chat_id] = "ai_chat_active"
             reply_text = bot_content["🤖 اسأل الذكاء الاصطناعي"]["menu_text"]
             reply_markup = create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
-            send_with_buttons(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=False)
+            send_unified_message(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=False)
             return
         elif user_text in bot_content:
             content_item = bot_content[user_text]
@@ -1181,7 +1157,7 @@ def handle_all_messages(message):
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"].get(parent_menu_key, {}).get("options", ["🔙 رجوع"]))
 
     # إرسال الرسالة النهائية
-    send_with_buttons(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=True)
+    send_unified_message(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=True)
 
 # ------------------------------------------------------------------
 # Webhook handlers + index
@@ -1206,4 +1182,6 @@ def index():
         return f'Failed to set webhook: {e}', 500
 
 if __name__ == '__main__':
-    print("Bot is ready. If running locally, use app.run(). For Render, Gunicorn handles it.")
+    print("✅ البوت يعتمد على دالة إرسال واحدة فقط - لا رجوع للوضع المائي!")
+    print("❌ ممنوع استخدام bot.send_message مباشرة")
+    print("✅ فقط send_unified_message مسموح")
