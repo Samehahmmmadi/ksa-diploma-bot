@@ -1,11 +1,11 @@
 import os
+import re
 from flask import Flask, request, abort
 import telebot
 from telebot import types
 import requests
 import json
 import base64  # تم إضافة هذه المكتبة لتحويل الصور إلى Base64
-import re   # لإزالة روابط الواتساب من المحتوى النصي
 
 # --- إعدادات البوت والـ API ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -27,6 +27,48 @@ else:
 # إعدادات واجهة برمجة تطبيقات Gemini
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 GEMINI_API_KEY = "AIzaSyAMTPehz-r1y1V2TKyNeItcjkFDxFvwJ1c"
+
+# ------------------------------------------------------------------
+# دوال تنظيف ونقل آمن للرسائل
+# ------------------------------------------------------------------
+def _remove_whatsapp_links_from_text(text: str) -> str:
+    """
+    تزيل روابط واتساب (chat.whatsapp.com ، wa.me ، whatsapp.com ، api.whatsapp.com) من النص.
+    نترك بقية الروابط كما هي حتى لا نحذف روابط مفيدة أخرى.
+    """
+    if not text:
+        return text
+    # نمط يلتقط روابط واتساب المعروفة
+    pattern = r'https?://(?:www\.)?(?:chat\.whatsapp\.com|wa\.me|api\.whatsapp\.com|whatsapp\.com)[^\s]*'
+    cleaned = re.sub(pattern, '', text)
+    # إزالة أي فراغات زائدة بعد الحذف
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+    return cleaned
+
+def safe_send_message(chat_id, text, reply_markup=None, parse_mode="HTML", disable_web_page_preview=True):
+    """
+    دالة إرسال آمنة: تنظف النص من روابط واتساب قبل الإرسال وتطبع تحذير في السجلات إذا تم حذف شيء.
+    """
+    try:
+        original = text or ""
+        cleaned = _remove_whatsapp_links_from_text(original)
+        if cleaned != original.strip():
+            # طباعة تحذير في السجلات لتتبع إن كان هناك نصوص تحتوي روابط واتساب
+            print(f"WARNING: Removed WhatsApp link(s) from message to {chat_id}. Original length={len(original)}, cleaned length={len(cleaned)}")
+        bot.send_message(
+            chat_id,
+            cleaned,
+            parse_mode=parse_mode,
+            reply_markup=reply_markup,
+            disable_web_page_preview=disable_web_page_preview
+        )
+    except Exception as e:
+        # إذا فشلت الإرسال عبر API، سجّل الخطأ وأعد محاولة بسيطة بدون تنظيف (كي لا يعلّق البوت تمامًا)
+        print(f"ERROR: safe_send_message failed for {chat_id}: {e}")
+        try:
+            bot.send_message(chat_id, text or "", parse_mode=parse_mode, reply_markup=reply_markup, disable_web_page_preview=disable_web_page_preview)
+        except Exception as ee:
+            print(f"CRITICAL: fallback send also failed for {chat_id}: {ee}")
 
 # ------------------------------------------------------------------
 #  دوال الأزرار الشفافة (Inline) والدالة الموحدة للإرسال
@@ -52,29 +94,18 @@ def get_whatsapp_buttons():
 
 def send_with_buttons(chat_id, text, reply_keyboard=None, include_whatsapp=True):
     """
-    ترسل الرسالة الأساسية مع (اختياري) ReplyKeyboard (لوحة القوائم).
+    ترسل الرسالة الأساسية بعد تنظيفها (باستخدام safe_send_message).
     ثم — إذا include_whatsapp=True — ترسل رسالة ثانية تحتوي على أزرار واتساب Inline.
     سبب الإرسال في رسالتين: تيليجرام لا يسمح بإرسال InlineKeyboard و ReplyKeyboard في نفس 'reply_markup'.
     """
-    # أرسل الرسالة الأساسية (مع لوحة الرد التقليدية إن وُجدت)
-    bot.send_message(
-        chat_id,
-        text,
-        parse_mode="HTML",
-        reply_markup=reply_keyboard,
-        disable_web_page_preview=True
-    )
+    # أرسل الرسالة الأساسية (مع لوحة الرد التقليدية إن وُجدت) بعد تنظيفها
+    safe_send_message(chat_id, text or "", reply_markup=reply_keyboard, disable_web_page_preview=True)
 
     # ثم أرسل أزرار واتساب إذا طُلب ذلك
     if include_whatsapp:
         header = "<b>🔗 روابط مجتمعات الواتساب:</b>"
-        bot.send_message(
-            chat_id,
-            header,
-            parse_mode="HTML",
-            reply_markup=get_whatsapp_buttons(),
-            disable_web_page_preview=True
-        )
+        # نستخدم safe_send_message أيضاً لتنظيف أي نص إضافي (لكن الروابط مُضمّنة بالأزرار، وليست في النص)
+        safe_send_message(chat_id, header, reply_markup=get_whatsapp_buttons(), disable_web_page_preview=True)
 
 # ------------------------------------------------------------------
 #  القوائم والـ state والدوال المساعدة (كما في كودك)
@@ -163,7 +194,7 @@ sg@cfy.ksu.edu.sa
 رقم المكتب: 2484
 
 المشرف على وحدة شؤون الطلاب
-sa@ksu.edu.sa
+sa@cfy.ksu.edu.sa
 
 ايميلات عمادة القبول والتسجيل
 dar@ksu.edu.sa
@@ -710,7 +741,7 @@ h.alshareef@cfy.ksu.edu.sa
 • إدراك دور التكنولوجيا في ممارسات التسويق.
 <b>🛠 ️ المخرجات المهارية:</b>
 • العمل بكفاءة ضمن فرق أو بشكل فردي.
-• الالتزام بال المعايير الأخلاقية في التسويق.
+• الالتزام بالمعايير الأخلاقية في التسويق.
 • التواصل الفّعّال كتابيًا وشفويًا باستخدام التقنية.
 <b>💼 الفرص الوظيفية:</b>
 يمكن لخريجي الدبلوم العمل في القطاعين الحكومي والخاص في الوظائف التالية:
@@ -851,7 +882,7 @@ h.alshareef@cfy.ksu.edu.sa
 
 <b>♦ قناة تابعة لقروب دبلوم جامعة الملك سعود:</b>
 قناة خاصة بحلول واجبات واختبارات مواد الدبلوم بجامعة الملك سعود KSU
-• 🔗 رابط القناة: <a href="https://t.me/Diploma_Solutions">قناة حلول الواجبات والالاختبارات</a>""",
+• 🔗 رابط القناة: <a href="https://t.me/Diploma_Solutions">قناة حلول الواجبات والاختبارات</a>""",
     "خدمات حل الواجبات وعمل المشاريع والبحوث": """🎓 <b>منصة عونك الأكاديمية – لجميع طلاب دبلومات جامعة الملك سعود</b>
 🔸 <i>سواء كنت طالبًا مستجدًا أو في أحد المستويات المتقدمة، وفرنا لك كل ما تحتاجه في مكانٍ واحد.</i>
 
@@ -877,7 +908,7 @@ h.alshareef@cfy.ksu.edu.sa
 • 🔸 جامعة الملك سعود (عليشة بنات): <a href="https://maps.app.goo.gl/nHSKPBWHqAdvspmz8?g_st=it">عرض على الخريطة</a>
 • 🔸 جامعة الملك سعود (الروابي - مشترك): <a href="https://maps.app.goo.gl/1Xf9MqXCPs9fVkng7?g_st=it">عرض على الخريطة</a>
 • 🔸 جامعة الملك سعود (المبنى الرئيسي - تركي الأول): <a href="https://maps.app.goo.gl/NjeJTWoj4mhK5MUKA?g_st=it">عرض على الخريطة</a>
-• 🔸 جامعة الملك سعود (الملز): <a href="https://maps.app.googl/4bnaxNA8vMDRSp9D7">عرض على الخريطة</a>
+• 🔸 جامعة الملك سعود (الملز): <a href="https://maps.app.goo.gl/4bnaxNA8vMDRSp9D7">عرض على الخريطة</a>
 • 🔸 جامعة الملك سعود (الوشم - عيال): <a href="https://maps.app.com/sCo9BkV1WaEeXVGa8?g_st=it">عرض على الخريطة</a>
 • 🔸 جامعة الملك سعود (المدينة الجامعية للطالبات): <a href="https://maps.me/EZcL9XVz1w8UomYF6?g_st=ic">عرض على الخريطة</a>""",
     "شروط التجسير في جامعة الملك سعود": "شروط التجسير في جامعة الملك سعود\n<a href=\"https://t.me/Diploma_Solutions/24\">عرض الشروط على تيليجرام</a>",
@@ -908,41 +939,6 @@ h.alshareef@cfy.ksu.edu.sa
         "options": ["🔙 رجوع"]
     }
 }
-
-# ---------------------------
-# تنظيف bot_content من روابط واتساب (تنفيذ بعد تعريف bot_content)
-# ---------------------------
-def _remove_whatsapp_links_from_text(text: str) -> str:
-    """
-    يزيل روابط واتساب (chat.whatsapp.com, wa.me, wa.link) وسطور رؤوس 'روابط مجتمعات' من نص.
-    يحافظ على بقية الروابط (مثل روابط تيليجرام أو Drive).
-    """
-    if not isinstance(text, str):
-        return text
-    # يحذف الروابط التي تحتوي chat.whatsapp.com أو wa.me أو wa.link
-    text = re.sub(r'https?://\S*(?:chat\.whatsapp\.com|wa\.me|wa\.link)\S*', '', text)
-    # يحذف أي سطر يحتوي عبارة "روابط مجتمعات" أو "روابط مجتمعات الواتساب" أو "روابط مجتمعات الواتساب"
-    text = re.sub(r'(?im)^\s*.*روابط\s+مجتمعات.*$\n?', '', text)
-    text = re.sub(r'(?im)^\s*.*روابط\s+مجتمعات\s+الواتساب.*$\n?', '', text)
-    # يحذف سطور فارغة زائدة
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
-
-def sanitize_bot_content(obj):
-    """
-    يعيد بنية bot_content نفسها لكن بعد إزالة روابط الواتساب من كل القيم النصية.
-    يدعم dict, list, str بشكل متداخل.
-    """
-    if isinstance(obj, dict):
-        return {k: sanitize_bot_content(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [sanitize_bot_content(v) for v in obj]
-    if isinstance(obj, str):
-        return _remove_whatsapp_links_from_text(obj)
-    return obj
-
-# نفّذ التنقية مباشرة بعد تعريف bot_content
-bot_content = sanitize_bot_content(bot_content)
 
 # ------------------------------------------------------------------
 # Handlers
@@ -1026,11 +1022,11 @@ def handle_all_messages(message):
                     prompt_parts.append({"text": "ماذا يوجد في هذه الصورة؟"})
             except Exception as e:
                 print(f"ERROR: Failed to process photo: {e}")
-                bot.send_message(chat_id, f"عذراً، حدث خطأ أثناء معالجة الصورة: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+                safe_send_message(chat_id, f"عذراً، حدث خطأ أثناء معالجة الصورة: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
                 return
 
         elif message.document:
-            bot.send_message(chat_id, "عذراً، لا أستطيع معالجة المستندات (مثل PDF أو Word) بواسطة الذكاء الاصطناعي حالياً. يمكنني فقط فهم النصوص والصور.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            safe_send_message(chat_id, "عذراً، لا أستطيع معالجة المستندات (مثل PDF أو Word) بواسطة الذكاء الاصطناعي حالياً. يمكنني فقط فهم النصوص والصور.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
             return
 
         if not prompt_parts:
@@ -1044,10 +1040,10 @@ def handle_all_messages(message):
             send_with_buttons(chat_id, ai_response, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=True)
         except requests.exceptions.RequestException as e:
             print(f"ERROR: Gemini API request failed: {e}")
-            bot.send_message(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            safe_send_message(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
         except Exception as e:
             print(f"ERROR: Unexpected error in AI chat: {e}")
-            bot.send_message(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            safe_send_message(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
         return
 
     # --- معالجة القوائم العادية ---
@@ -1186,13 +1182,18 @@ def handle_all_messages(message):
 
     # إرسال النتيجة: إما مع أزرار واتساب أو بدونها حسب المتغير
     try:
+        # تنظيف نهائي دفاعي لأي نص سوف يُرسل
+        cleaned_reply_text = _remove_whatsapp_links_from_text(reply_text or "")
+        if cleaned_reply_text != (reply_text or "").strip():
+            print(f"WARNING: Removed WhatsApp link(s) from message to {chat_id} (final send).")
+        # الآن أرسل
         if add_whatsapp_buttons:
-            send_with_buttons(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=True)
+            send_with_buttons(chat_id, cleaned_reply_text, reply_keyboard=reply_markup, include_whatsapp=True)
         else:
-            bot.send_message(chat_id, reply_text, parse_mode="HTML", reply_markup=reply_markup, disable_web_page_preview=True)
+            safe_send_message(chat_id, cleaned_reply_text, reply_markup=reply_markup, disable_web_page_preview=True)
     except telebot.apihelper.ApiTelegramException as e:
         print(f"ERROR: Failed to send message to {chat_id}: {e}")
-        bot.send_message(chat_id, "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.", parse_mode="HTML", reply_markup=reply_markup)
+        safe_send_message(chat_id, "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.", reply_markup=reply_markup)
 
 # ------------------------------------------------------------------
 # Webhook handlers + index
