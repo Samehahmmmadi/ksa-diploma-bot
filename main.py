@@ -27,43 +27,57 @@ else:
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 GEMINI_API_KEY = "AIzaSyAMTPehz-r1y1V2TKyNeItcjkFDxFvwJ1c"
 
-# --- النص المائي (الروابط) الذي سيتم إضافته في الأسفل ---
-WATERMARK_TEXT = """
-\n\n--------------------------------------------------\n
-<b>🔗 روابط مجتمعات الواتساب 🔗</b>
+# ------------------------------------------------------------------
+#  دوال الأزرار الشفافة (Inline) والدالة الموحدة للإرسال
+# ------------------------------------------------------------------
+def get_whatsapp_buttons():
+    """ترجع InlineKeyboardMarkup يحتوي أزرار مجتمعات الواتساب"""
+    markup = types.InlineKeyboardMarkup()
 
-<a href="https://chat.whatsapp.com/BnV2peiKf365odX0PjGb63">
-قروب مستجدين (دبلوم إدارة أعمال التأمين)
-</a>
+    btn1 = types.InlineKeyboardButton("📦 دبلوم إدارة أعمال التأمين", url="https://chat.whatsapp.com/BnV2peiKf365odX0PjGb63")
+    btn2 = types.InlineKeyboardButton("📣 قروب تسويق", url="https://chat.whatsapp.com/FsIsVzwxdNjFmuNsPBQOxw")
+    btn3 = types.InlineKeyboardButton("💰 دبلوم مالية ومصرفية", url="https://chat.whatsapp.com/I5HxSO2YCTkAMkS8XzV2tt")
+    btn4 = types.InlineKeyboardButton("👥 دبلوم موارد بشرية", url="https://chat.whatsapp.com/HenxzVBDwBb8ypl1VWonfb")
+    btn5 = types.InlineKeyboardButton("⚖️ تجارب وآراء الدكاترة والشعب", url="https://chat.whatsapp.com/L4cxz9XYEXHI3eCG5WZYLx")
 
-<a href="https://chat.whatsapp.com/FsIsVzwxdNjFmuNsPBQOxw">
-قروب تسويق
-</a>
+    # صف كل زر في سطر منفصل
+    markup.add(btn1)
+    markup.add(btn2)
+    markup.add(btn3)
+    markup.add(btn4)
+    markup.add(btn5)
 
-<a href="https://chat.whatsapp.com/I5HxSO2YCTkAMkS8XzV2tt">
-قروب مستجدين (دبلوم مالية ومصرفية عن بعد)
-</a>
+    return markup
 
-<a href="https://chat.whatsapp.com/HenxzVBDwBb8ypl1VWonfb">
-قروب مستجدين (دبلوم موارد بشرية)
-</a>
-"""
-
-# --- دالة موحدة لإرسال الرسائل مع العلامة المائية ---
-def send_with_watermark(chat_id, text, keyboard=None):
+def send_with_buttons(chat_id, text, reply_keyboard=None, include_whatsapp=True):
     """
-    ترسل رسالة مع العلامة المائية دائمًا في نهايتها.
+    ترسل الرسالة الأساسية مع (اختياري) ReplyKeyboard (لوحة القوائم).
+    ثم — إذا include_whatsapp=True — ترسل رسالة ثانية تحتوي على أزرار واتساب Inline.
+    سبب الإرسال في رسالتين: تيليجرام لا يسمح بإرسال InlineKeyboard و ReplyKeyboard في نفس 'reply_markup'.
     """
-    text_with_watermark = text + "\n\n" + WATERMARK_TEXT
+    # أرسل الرسالة الأساسية (مع لوحة الرد التقليدية إن وُجدت)
     bot.send_message(
         chat_id,
-        text_with_watermark,
+        text,
         parse_mode="HTML",
-        reply_markup=keyboard,
+        reply_markup=reply_keyboard,
         disable_web_page_preview=True
     )
 
-# -- قائمة الأوامر والتابات وحالة المستخدم --
+    # ثم أرسل أزرار واتساب إذا طُلب ذلك
+    if include_whatsapp:
+        header = "<b>🔗 روابط مجتمعات الواتساب:</b>"
+        bot.send_message(
+            chat_id,
+            header,
+            parse_mode="HTML",
+            reply_markup=get_whatsapp_buttons(),
+            disable_web_page_preview=True
+        )
+
+# ------------------------------------------------------------------
+#  القوائم والـ state والدوال المساعدة (كما في كودك)
+# ------------------------------------------------------------------
 left_commands = ["star", "help"]
 
 right_tabs = [
@@ -129,7 +143,9 @@ def get_gemini_multimodal_response(parts):
         print(f"ERROR: Unexpected Gemini API response structure: {result}")
         return "عذراً، لم أتمكن من الحصول على إجابة واضحة من الذكاء الاصطناعي."
 
-# --- قاموس المحتوى (bot_content) --- (تم تحويل أي Markdown إلى HTML)
+# ------------------------------------------------------------------
+# كامل bot_content (تم تضمين كل الحقول التي أرسلتها)
+# ------------------------------------------------------------------
 bot_content = {
     "تقويم عام 1447ه‍.": "<b>🔹 التقويم الأكاديمي لجامعة الملك سعود للعام الدراسي 2025 / 2026م (1447هـ):</b>\n\n<a href=\"https://t.me/KSDN_222/85\">اضغط هنا لمشاهدة التقويم الأكاديمي 👇</a>",
     "خدمات التواصل مع الجامعة": """عمادة السنة الأولى المشتركة
@@ -892,6 +908,10 @@ h.alshareef@cfy.ksu.edu.sa
     }
 }
 
+# ------------------------------------------------------------------
+# Handlers
+# ------------------------------------------------------------------
+
 # --- /start ---
 @bot.message_handler(commands=['start'])
 def start_handler(message):
@@ -910,7 +930,7 @@ def start_handler(message):
         "قناة مساعدات طلاب الدبلوم 👇\n"
         "<a href=\"https://t.me/Diploma_Solutions\">اضغط هنا للانضمام للقناة</a>"
     )
-    send_with_watermark(chat_id, text, keyboard=get_main_keyboard())
+    send_with_buttons(chat_id, text, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
 
 # --- star & help ---
 @bot.message_handler(func=lambda m: m.text in left_commands)
@@ -929,11 +949,11 @@ def left_command_handler(message):
             "اضغط على الأوامر الموجودة في القائمة أدناه لتحصل على كل ما تحتاجه\n\n"
             "🎯 نأمل أن تنال خدمتنا رضاكم وأن نكون عند حسن ظنكم…"
         )
-        send_with_watermark(chat_id, reply, keyboard=get_main_keyboard())
+        send_with_buttons(chat_id, reply, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
 
     elif text == "help":
         reply = "فيديو شرح استخدام البوت سيتوفر قريبًا"
-        send_with_watermark(chat_id, reply, keyboard=get_main_keyboard())
+        send_with_buttons(chat_id, reply, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
 
 # --- معالج عام لجميع أنواع الرسائل (نص، صور، مستندات) ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'document'])
@@ -947,7 +967,7 @@ def handle_all_messages(message):
         if message.text == "🔙 رجوع":
             user_states[chat_id] = "main_menu"
             reply_text = "تم الخروج من وضع الدردشة مع الذكاء الاصطناعي. أهلاً بك في القائمة الرئيسية."
-            send_with_watermark(chat_id, reply_text, keyboard=get_main_keyboard())
+            send_with_buttons(chat_id, reply_text, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
             return
 
         bot.send_chat_action(chat_id, 'typing')
@@ -979,13 +999,13 @@ def handle_all_messages(message):
 
         if not prompt_parts:
             reply_text = "الرجاء إرسال نص أو صورة لأقوم بمعالجتها."
-            send_with_watermark(chat_id, reply_text, keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            send_with_buttons(chat_id, reply_text, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=True)
             return
 
         try:
             ai_response = get_gemini_multimodal_response(prompt_parts)
             # تأكد من أن نص الـ AI لا يحتوي Markdown — إن احتجت تنظيفًا إضافيًا أضفه هنا
-            send_with_watermark(chat_id, ai_response, keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            send_with_buttons(chat_id, ai_response, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=True)
         except requests.exceptions.RequestException as e:
             print(f"ERROR: Gemini API request failed: {e}")
             bot.send_message(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
@@ -997,7 +1017,7 @@ def handle_all_messages(message):
     # --- معالجة القوائم العادية ---
     reply_text = "عذراً، لم أفهم طلبك. الرجاء استخدام الأزرار."
     reply_markup = get_main_keyboard()
-    add_watermark = True
+    add_whatsapp_buttons = True
 
     if user_text == "🔙 رجوع":
         if current_state.startswith("حضوري_sub_sub_menu_"):
@@ -1051,7 +1071,7 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا التبويب غير موجود. الرجاء استخدام الأزرار."
             reply_markup = get_main_keyboard()
-            add_watermark = False
+            add_whatsapp_buttons = False
 
     elif current_state == "حضوري_sub_menu":
         if user_text in bot_content["تخصصات برامج الدبلوم - حضوري"]:
@@ -1066,7 +1086,7 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا التخصص غير موجود في قائمة الدبلوم الحضوري. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["تخصصات برامج الدبلوم - حضوري"]["options"])
-            add_watermark = False
+            add_whatsapp_buttons = False
 
     elif current_state.startswith("حضوري_sub_sub_menu_"):
         parent_menu_key = current_state.replace("حضوري_sub_sub_menu_", "")
@@ -1077,7 +1097,7 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
-            add_watermark = False
+            add_whatsapp_buttons = False
 
     elif current_state == "عن_بعد_sub_menu":
         if user_text in bot_content["تخصصات برامج الدبلوم - عن بُعد"]:
@@ -1092,7 +1112,7 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود في قائمة الدبلوم عن بُعد. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["تخصصات برامج الدبلوم - عن بُعد"]["options"])
-            add_watermark = False
+            add_whatsapp_buttons = False
 
     elif current_state.startswith("عن_بعد_sub_sub_menu_"):
         parent_menu_key = current_state.replace("عن_بعد_sub_sub_menu_", "")
@@ -1103,7 +1123,7 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
-            add_watermark = False
+            add_whatsapp_buttons = False
 
     elif current_state == "books_menu":
         if user_text in bot_content["كتب وملخصات مواد الدبلوم"]:
@@ -1115,7 +1135,7 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"]["options"])
-            add_watermark = False
+            add_whatsapp_buttons = False
 
     elif current_state.startswith("books_sub_menu_"):
         parent_menu_key = current_state.replace("books_sub_menu_", "")
@@ -1126,19 +1146,21 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"].get(parent_menu_key, {}).get("options", ["🔙 رجوع"]))
-            add_watermark = False
+            add_whatsapp_buttons = False
 
-    # إرسال النتيجة: إما مع العلامة المائية أو بدونها حسب المتغير
+    # إرسال النتيجة: إما مع أزرار واتساب أو بدونها حسب المتغير
     try:
-        if add_watermark:
-            send_with_watermark(chat_id, reply_text, keyboard=reply_markup)
+        if add_whatsapp_buttons:
+            send_with_buttons(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=True)
         else:
             bot.send_message(chat_id, reply_text, parse_mode="HTML", reply_markup=reply_markup, disable_web_page_preview=True)
     except telebot.apihelper.ApiTelegramException as e:
         print(f"ERROR: Failed to send message to {chat_id}: {e}")
         bot.send_message(chat_id, "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.", parse_mode="HTML", reply_markup=reply_markup)
 
-# --- معالج طلبات الـ Webhook من Telegram ---
+# ------------------------------------------------------------------
+# Webhook handlers + index
+# ------------------------------------------------------------------
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook_handler():
     if request.headers.get('content-type') == 'application/json':
@@ -1149,7 +1171,6 @@ def webhook_handler():
     else:
         abort(403)
 
-# مسار لبدء البوت وإعداد الـ webhook (عند زيارة URL الرئيسي)
 @app.route('/')
 def index():
     try:
@@ -1159,6 +1180,5 @@ def index():
     except Exception as e:
         return f'Failed to set webhook: {e}', 500
 
-# التشغيل المحلي لاختبار فقط (Gunicorn سيستدعي التطبيق على Render)
 if __name__ == '__main__':
     print("Bot is ready. If running locally, use app.run(). For Render, Gunicorn handles it.")
