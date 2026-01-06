@@ -5,7 +5,7 @@ import telebot
 from telebot import types
 import requests
 import json
-import base64  # تم إضافة هذه المكتبة لتحويل الصور إلى Base64
+import base64
 
 # --- إعدادات البوت والـ API ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -33,46 +33,29 @@ GEMINI_API_KEY = "AIzaSyAMTPehz-r1y1V2TKyNeItcjkFDxFvwJ1c"
 # ------------------------------------------------------------------
 def _remove_whatsapp_links_from_text(text: str) -> str:
     """
-    تزيل روابط واتساب (chat.whatsapp.com ، wa.me ، whatsapp.com ، api.whatsapp.com) من النص.
-    نترك بقية الروابط كما هي حتى لا نحذف روابط مفيدة أخرى.
+    تزيل روابط واتساب من النص نهائيًا.
     """
     if not text:
         return text
-    # نمط يلتقط روابط واتساب المعروفة
-    pattern = r'https?://(?:www\.)?(?:chat\.whatsapp\.com|wa\.me|api\.whatsapp\.com|whatsapp\.com)[^\s]*'
-    cleaned = re.sub(pattern, '', text)
+    
+    # أنماط روابط الواتساب الشائعة
+    patterns = [
+        r'https?://(?:www\.)?(?:chat\.whatsapp\.com|wa\.me|api\.whatsapp\.com|whatsapp\.com|wa\.link)[^\s]*',
+        r'روابط مجتمعات[^\n]*',
+        r'🔗[^\n]*واتساب[^\n]*',
+        r'📲[^\n]*واتساب[^\n]*'
+    ]
+    
+    cleaned = text
+    for pattern in patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+    
     # إزالة أي فراغات زائدة بعد الحذف
     cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    
     return cleaned
 
-def safe_send_message(chat_id, text, reply_markup=None, parse_mode="HTML", disable_web_page_preview=True):
-    """
-    دالة إرسال آمنة: تنظف النص من روابط واتساب قبل الإرسال وتطبع تحذير في السجلات إذا تم حذف شيء.
-    """
-    try:
-        original = text or ""
-        cleaned = _remove_whatsapp_links_from_text(original)
-        if cleaned != original.strip():
-            # طباعة تحذير في السجلات لتتبع إن كان هناك نصوص تحتوي روابط واتساب
-            print(f"WARNING: Removed WhatsApp link(s) from message to {chat_id}. Original length={len(original)}, cleaned length={len(cleaned)}")
-        bot.send_message(
-            chat_id,
-            cleaned,
-            parse_mode=parse_mode,
-            reply_markup=reply_markup,
-            disable_web_page_preview=disable_web_page_preview
-        )
-    except Exception as e:
-        # إذا فشلت الإرسال عبر API، سجّل الخطأ وأعد محاولة بسيطة بدون تنظيف (كي لا يعلّق البوت تمامًا)
-        print(f"ERROR: safe_send_message failed for {chat_id}: {e}")
-        try:
-            bot.send_message(chat_id, text or "", parse_mode=parse_mode, reply_markup=reply_markup, disable_web_page_preview=disable_web_page_preview)
-        except Exception as ee:
-            print(f"CRITICAL: fallback send also failed for {chat_id}: {ee}")
-
-# ------------------------------------------------------------------
-#  دوال الأزرار الشفافة (Inline) والدالة الموحدة للإرسال
-# ------------------------------------------------------------------
 def get_whatsapp_buttons():
     """ترجع InlineKeyboardMarkup يحتوي أزرار مجتمعات الواتساب"""
     markup = types.InlineKeyboardMarkup()
@@ -94,21 +77,33 @@ def get_whatsapp_buttons():
 
 def send_with_buttons(chat_id, text, reply_keyboard=None, include_whatsapp=True):
     """
-    ترسل الرسالة الأساسية بعد تنظيفها (باستخدام safe_send_message).
-    ثم — إذا include_whatsapp=True — ترسل رسالة ثانية تحتوي على أزرار واتساب Inline.
-    سبب الإرسال في رسالتين: تيليجرام لا يسمح بإرسال InlineKeyboard و ReplyKeyboard في نفس 'reply_markup'.
+    الدالة الموحدة للإرسال - ترسل دائمًا مع أزرار واتساب شفافة
     """
-    # أرسل الرسالة الأساسية (مع لوحة الرد التقليدية إن وُجدت) بعد تنظيفها
-    safe_send_message(chat_id, text or "", reply_markup=reply_keyboard, disable_web_page_preview=True)
+    # تنظيف النص من أي روابط واتساب
+    clean_text = _remove_whatsapp_links_from_text(text)
+    
+    # أرسل الرسالة الأساسية
+    bot.send_message(
+        chat_id,
+        clean_text,
+        parse_mode="HTML",
+        reply_markup=reply_keyboard,
+        disable_web_page_preview=True
+    )
 
-    # ثم أرسل أزرار واتساب إذا طُلب ذلك
+    # أرسل أزرار واتساب الشفافة في رسالة منفصلة
     if include_whatsapp:
-        header = "<b>🔗 روابط مجتمعات الواتساب:</b>"
-        # نستخدم safe_send_message أيضاً لتنظيف أي نص إضافي (لكن الروابط مُضمّنة بالأزرار، وليست في النص)
-        safe_send_message(chat_id, header, reply_markup=get_whatsapp_buttons(), disable_web_page_preview=True)
+        whatsapp_header = "<b>🔗 روابط مجتمعات الواتساب:</b>"
+        bot.send_message(
+            chat_id,
+            whatsapp_header,
+            parse_mode="HTML",
+            reply_markup=get_whatsapp_buttons(),
+            disable_web_page_preview=True
+        )
 
 # ------------------------------------------------------------------
-#  القوائم والـ state والدوال المساعدة (كما في كودك)
+# القوائم والـ state والدوال المساعدة
 # ------------------------------------------------------------------
 left_commands = ["star", "help"]
 
@@ -149,7 +144,7 @@ def get_main_keyboard():
         markup.add(tab)
     return markup
 
-# --- دالة استدعاء Gemini (كما في كودك) ---
+# --- دالة استدعاء Gemini ---
 def get_gemini_multimodal_response(parts):
     if not GEMINI_API_KEY:
         return "عذراً، لا يمكنني التواصل مع الذكاء الاصطناعي حالياً. مفتاح الـ API غير متوفر."
@@ -176,7 +171,7 @@ def get_gemini_multimodal_response(parts):
         return "عذراً، لم أتمكن من الحصول على إجابة واضحة من الذكاء الاصطناعي."
 
 # ------------------------------------------------------------------
-# كامل bot_content (تم تضمين كل الحقول التي أرسلتها)
+# كامل bot_content (بدون روابط واتساب مائية)
 # ------------------------------------------------------------------
 bot_content = {
     "تقويم عام 1447ه‍.": "<b>🔹 التقويم الأكاديمي لجامعة الملك سعود للعام الدراسي 2025 / 2026م (1447هـ):</b>\n\n<a href=\"https://t.me/KSDN_222/85\">اضغط هنا لمشاهدة التقويم الأكاديمي 👇</a>",
@@ -531,8 +526,7 @@ h.alshareef@cfy.ksu.edu.sa
 <b>الخطة الدراسية:</b>
 توفر الخطة الدراسية مقررات متخصصة تهدف إلى تأهيل الطلاب بفهم شامل ومتقدم لأنظمة المحاسبة الضريبية والتشريعات المتعلقة بها، بما يمكنهم من العمل بكفاءة في المجالات المحاسبية والضريبية.
 """,
-            "الخطة الدراسية": "الخطة الدراسية لدبلوم المحاسبة الضريبية: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>",
-            "وصف المقررات": "وصف المقررات الدراسية للدبلوم المتوسط في السكرتارية الطبية (الجديدة): <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/wsf_mqrrt_dblwm_lskrtry_ltby.pdf\">عرض الوصف</a>"
+            "الخطة الدراسية": "الخطة الدراسية لدبلوم المحاسبة الضريبية: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>"
         },
         "دبلوم الترجمة بلغة الإشارة": {
             "menu_text": "الرجاء اختيار: ",
@@ -558,8 +552,7 @@ h.alshareef@cfy.ksu.edu.sa
 • العمل في الجهات الحكومية والخدمية والقطاع الخاص.
 • العمل في مراكز خدمات الصم وضعاف السمع.
 """,
-            "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في الترجمة بلغة الإشارة: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>",
-            "وصف المقررات": "وصف المقررات الدراسية للدبلوم المتوسط في السكرتارية الطبية (الجديدة): <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/wsf_mqrrt_dblwm_lskrtry_ltby.pdf\">عرض الوصف</a>"
+            "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في الترجمة بلغة الإشارة: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>"
         },
         "دبلوم مقدمي الرعاية بالحضانات": {
             "menu_text": "الرجاء اختيار: ",
@@ -598,8 +591,7 @@ h.alshareef@cfy.ksu.edu.sa
 • المشاركة في برامج التبادل الثقافي والتجاري.
 • تلبية احتياجات الجهات التي تسعى لمواكبة التطور في لغات العصر.
 """,
-            "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في اللغة الصينية: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>",
-            "وصف المقررات": "وصف المقررات الدراسية للدبلوم المتوسط في السكرتارية الطبية (الجديدة): <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/wsf_mqrrt_dblwm_lskrtry_ltby.pdf\">عرض الوصف</a>"
+            "الخطة الدراسية": "الخطة الدراسية للدبلوم المتوسط في اللغة الصينية: <a href=\"https://ascs.ksu.edu.sa/sites/ascs.ksu.edu.sa/files/attach/%D8%A7%D9%84%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D8%A9_%D8%A7%D9%84%D9%85%D8%AA%D9%88%D8%B3%D8%B7%D8%A9_0.pdf\">عرض الخطة</a>"
         },
         "الدبلوم المشارك في العمل الخيري": {
             "menu_text": "الرجاء اختيار: ",
@@ -754,7 +746,7 @@ h.alshareef@cfy.ksu.edu.sa
 • كاتب في إدارة التسويق
 📌 <b>لمزيد من التفاصيل حول برامج الدبلوم (حضوري وعن بُعد):</b>""",
             "الخطة الدراسية": "◆ الخطة الدراسية الدبلوم المتوسط في التسويق: <a href=\"https://drive.google.com/file/d/11yZhKDyLJUiEMS4sW9MTLcnjwnXibB4G/view?usp=drivesdk\">عرض الخطة الدراسية</a>",
-            "وصف المقررات": "◆ وصف مقررات الدبلوم المتوسط في التسويق: <a href=\"https://drive.google.com/file/d/11onug3ZiaUdW_B6v504xAiVQXU0AIv43/view?usp=drivesdk\">عرض الوصف</a> • للمزيد: <a href=\"https://t.me/Diploma_Solutions/23\">شرح إضافي على تيليجرام</a>"
+            "وصف المقررات": "◆ وصف مقررات الدبلوم المتوسط في التسويق: <a href=\"https://drive.google.com/file/d/11onug3ZiaUdW_B6v504xAiVQXU0AIv43/view?usp=drivesdk\">عرض الوصف</a>"
         },
         "خدمات طلابية ، متابعة الاعمال الفصلية": """🎯 خدمة الاشتراك في حلول ومتابعة الأعمال الفصلية
 هل وقتك ضيّق؟ هل تجد صعوبة في متابعة المهام الجامعية؟ 🤯
@@ -771,9 +763,11 @@ h.alshareef@cfy.ksu.edu.sa
 عبر واتساب:
 <a href="https://wa.me/967733365187">منصة عون الأكاديمية - تواصل واتساب</a>
 ✍️ دمتم بود وتوفيق دائم بإذن الله 🌿""",
-        "كتب و ملخصات مواد الدبلوم عن بعد 📚 PDF": """قناه خاصه كتب وملخصات وتجميعات والاختبارات الذاتية مواد dبلوم جامعة سعودKSU) )
+        "كتب و ملخصات مواد الدبلوم عن بعد 📚 PDF": """قناه خاصه كتب وملخصات وتجميعات والاختبارات الذاتية مواد دبلوم جامعة الملك سعود
+
 📌 رابط قناة مستجدين دبلوم الملك سعود
 <a href="https://t.me/Diploma_New_1447">قروب مستجدين دبلوم الملك سعود</a>
+
 رابط القناة
 <a href="https://t.me/KDiplomasSU">قناة الكتب والملخصات</a>"""
     },
@@ -940,6 +934,19 @@ h.alshareef@cfy.ksu.edu.sa
     }
 }
 
+# تنظيف جميع المحتويات من روابط الواتساب
+def sanitize_content(content):
+    if isinstance(content, dict):
+        return {k: sanitize_content(v) for k, v in content.items()}
+    elif isinstance(content, list):
+        return [sanitize_content(item) for item in content]
+    elif isinstance(content, str):
+        return _remove_whatsapp_links_from_text(content)
+    else:
+        return content
+
+bot_content = sanitize_content(bot_content)
+
 # ------------------------------------------------------------------
 # Handlers
 # ------------------------------------------------------------------
@@ -987,7 +994,7 @@ def left_command_handler(message):
         reply = "فيديو شرح استخدام البوت سيتوفر قريبًا"
         send_with_buttons(chat_id, reply, reply_keyboard=get_main_keyboard(), include_whatsapp=True)
 
-# --- معالج عام لجميع أنواع الرسائل (نص، صور، مستندات) ---
+# --- معالج عام لجميع أنواع الرسائل ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'document'])
 def handle_all_messages(message):
     chat_id = message.chat.id
@@ -1022,34 +1029,32 @@ def handle_all_messages(message):
                     prompt_parts.append({"text": "ماذا يوجد في هذه الصورة؟"})
             except Exception as e:
                 print(f"ERROR: Failed to process photo: {e}")
-                safe_send_message(chat_id, f"عذراً، حدث خطأ أثناء معالجة الصورة: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+                send_with_buttons(chat_id, f"عذراً، حدث خطأ أثناء معالجة الصورة: {e}", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
                 return
 
         elif message.document:
-            safe_send_message(chat_id, "عذراً، لا أستطيع معالجة المستندات (مثل PDF أو Word) بواسطة الذكاء الاصطناعي حالياً. يمكنني فقط فهم النصوص والصور.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            send_with_buttons(chat_id, "عذراً، لا أستطيع معالجة المستندات (مثل PDF أو Word) بواسطة الذكاء الاصطناعي حالياً. يمكنني فقط فهم النصوص والصور.", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
             return
 
         if not prompt_parts:
             reply_text = "الرجاء إرسال نص أو صورة لأقوم بمعالجتها."
-            send_with_buttons(chat_id, reply_text, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=True)
+            send_with_buttons(chat_id, reply_text, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
             return
 
         try:
             ai_response = get_gemini_multimodal_response(prompt_parts)
-            # تأكد من أن نص الـ AI لا يحتوي Markdown — إن احتجت تنظيفًا إضافيًا أضفه هنا
-            send_with_buttons(chat_id, ai_response, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=True)
+            send_with_buttons(chat_id, ai_response, reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
         except requests.exceptions.RequestException as e:
             print(f"ERROR: Gemini API request failed: {e}")
-            safe_send_message(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            send_with_buttons(chat_id, f"عذراً، حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: {e}", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
         except Exception as e:
             print(f"ERROR: Unexpected error in AI chat: {e}")
-            safe_send_message(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", reply_markup=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]))
+            send_with_buttons(chat_id, "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك.", reply_keyboard=create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"]), include_whatsapp=False)
         return
 
     # --- معالجة القوائم العادية ---
     reply_text = "عذراً، لم أفهم طلبك. الرجاء استخدام الأزرار."
     reply_markup = get_main_keyboard()
-    add_whatsapp_buttons = True
 
     if user_text == "🔙 رجوع":
         if current_state.startswith("حضوري_sub_sub_menu_"):
@@ -1086,6 +1091,8 @@ def handle_all_messages(message):
             user_states[chat_id] = "ai_chat_active"
             reply_text = bot_content["🤖 اسأل الذكاء الاصطناعي"]["menu_text"]
             reply_markup = create_keyboard(bot_content["🤖 اسأل الذكاء الاصطناعي"]["options"])
+            send_with_buttons(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=False)
+            return
         elif user_text in bot_content:
             content_item = bot_content[user_text]
             if isinstance(content_item, dict) and "options" in content_item:
@@ -1103,7 +1110,6 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا التبويب غير موجود. الرجاء استخدام الأزرار."
             reply_markup = get_main_keyboard()
-            add_whatsapp_buttons = False
 
     elif current_state == "حضوري_sub_menu":
         if user_text in bot_content["تخصصات برامج الدبلوم - حضوري"]:
@@ -1118,7 +1124,6 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا التخصص غير موجود في قائمة الدبلوم الحضوري. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["تخصصات برامج الدبلوم - حضوري"]["options"])
-            add_whatsapp_buttons = False
 
     elif current_state.startswith("حضوري_sub_sub_menu_"):
         parent_menu_key = current_state.replace("حضوري_sub_sub_menu_", "")
@@ -1129,7 +1134,6 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
-            add_whatsapp_buttons = False
 
     elif current_state == "عن_بعد_sub_menu":
         if user_text in bot_content["تخصصات برامج الدبلوم - عن بُعد"]:
@@ -1144,7 +1148,6 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود في قائمة الدبلوم عن بُعد. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["تخصصات برامج الدبلوم - عن بُعد"]["options"])
-            add_whatsapp_buttons = False
 
     elif current_state.startswith("عن_بعد_sub_sub_menu_"):
         parent_menu_key = current_state.replace("عن_بعد_sub_sub_menu_", "")
@@ -1155,7 +1158,6 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(menu_dict.get("options", ["🔙 رجوع"]))
-            add_whatsapp_buttons = False
 
     elif current_state == "books_menu":
         if user_text in bot_content["كتب وملخصات مواد الدبلوم"]:
@@ -1167,7 +1169,6 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"]["options"])
-            add_whatsapp_buttons = False
 
     elif current_state.startswith("books_sub_menu_"):
         parent_menu_key = current_state.replace("books_sub_menu_", "")
@@ -1178,22 +1179,9 @@ def handle_all_messages(message):
         else:
             reply_text = "عذراً، هذا الخيار غير موجود. الرجاء استخدام الأزرار."
             reply_markup = create_keyboard(bot_content["كتب وملخصات مواد الدبلوم"].get(parent_menu_key, {}).get("options", ["🔙 رجوع"]))
-            add_whatsapp_buttons = False
 
-    # إرسال النتيجة: إما مع أزرار واتساب أو بدونها حسب المتغير
-    try:
-        # تنظيف نهائي دفاعي لأي نص سوف يُرسل
-        cleaned_reply_text = _remove_whatsapp_links_from_text(reply_text or "")
-        if cleaned_reply_text != (reply_text or "").strip():
-            print(f"WARNING: Removed WhatsApp link(s) from message to {chat_id} (final send).")
-        # الآن أرسل
-        if add_whatsapp_buttons:
-            send_with_buttons(chat_id, cleaned_reply_text, reply_keyboard=reply_markup, include_whatsapp=True)
-        else:
-            safe_send_message(chat_id, cleaned_reply_text, reply_markup=reply_markup, disable_web_page_preview=True)
-    except telebot.apihelper.ApiTelegramException as e:
-        print(f"ERROR: Failed to send message to {chat_id}: {e}")
-        safe_send_message(chat_id, "عذراً، حدث خطأ أثناء عرض المحتوى. الرجاء المحاولة لاحقاً.", reply_markup=reply_markup)
+    # إرسال الرسالة النهائية
+    send_with_buttons(chat_id, reply_text, reply_keyboard=reply_markup, include_whatsapp=True)
 
 # ------------------------------------------------------------------
 # Webhook handlers + index
