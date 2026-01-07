@@ -5,6 +5,12 @@ from telebot import types
 import requests
 import json
 
+print("=" * 60)
+print("✅ CLEAN BOT VERSION - NO WATERMARK")
+print("✅ CREATED: 2026-01-07")
+print("✅ TRANSPARENT WHATSAPP BUTTONS ONLY")
+print("=" * 60)
+
 # --- إعدادات البوت والـ API ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
