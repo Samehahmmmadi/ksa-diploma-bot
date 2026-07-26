@@ -36,11 +36,11 @@ def get_whatsapp_buttons():
     """ترجع أزرار واتساب شفافة فقط"""
     markup = types.InlineKeyboardMarkup()
     
-    btn1 = types.InlineKeyboardButton("📦 دبلوم إدارة أعمال التأمين", url="https://chat.whatsapp.com/BnV2peiK65odX0PjGb63")
+    btn1 = types.InlineKeyboardButton("📦 دبلوم إدارة أعمال التأمين", url="https://chat.whatsapp.com/BnV2peiK65odX0PjGb")
     btn2 = types.InlineKeyboardButton("📣 قروب تسويق", url="https://chat.whatsapp.com/FsIsVzwxdNFmusPBQOxw")
-    btn3 = types.InlineKeyboardButton("💰 دبلوم مالية ومصرفية", url="https://chat.whatsapp.com/I5HxSO2YCkAMkS8XV2tt")
-    btn4 = types.InlineKeyboardButton("👥 دبلوم موارد بشرية", url="https://chat.whatsapp.com/HenxzVBDwb8yplVWonfb")
-    btn5 = types.InlineKeyboardButton("⚖️ تجارب وآراء الدكاترة والشعب", url="https://chat.whatsapp.com/L4cxz9XYHI3eCG5WZYLx")
+    btn3 = types.InlineKeyboardButton("💰 دبلوم مالية ومصرفية", url="https://chat.whatsapp.com/I5HxSO2YCkAMkS82")
+    btn4 = types.InlineKeyboardButton("👥 دبلوم موارد بشرية", url="https://chat.whatsapp.com/HenxzVBDwb8yplVWon")
+    btn5 = types.InlineKeyboardButton("⚖️ تجارب وآراء الدكاترة والشعب", url="https://chat.whatsapp.com/L4cxz9XYHI3eCG5WLx")
 
     markup.add(btn1)
     markup.add(btn2)
